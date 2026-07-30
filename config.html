@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SuperTable — Configure</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#161A20; --ink-soft:#616B78; --line:#DEE3E7; --paper:#F5F7F6;
+    --accent:#0E6F63; --accent-soft:#E3F2EF; --accent-soft-strong:#CBE7E1;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'IBM Plex Sans',sans-serif;background:#fff;color:var(--ink);padding:18px;}
+  h2{font-family:'Space Grotesk',sans-serif;font-size:16px;margin:0 0 4px;}
+  p.hint{font-size:12.5px;color:var(--ink-soft);margin:0 0 14px;}
+  .list{border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;margin-bottom:16px;}
+  label{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;font-size:13px;}
+  label:last-child{border-bottom:none;}
+  label:hover{background:var(--paper);}
+  label.active{background:var(--accent-soft);}
+  input[type=radio]{cursor:pointer;}
+  .actions{display:flex;justify-content:flex-end;gap:8px;}
+  button{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:12.5px;padding:8px 14px;border-radius:6px;cursor:pointer;border:1px solid var(--line);background:#fff;}
+  button.primary{background:var(--ink);color:#fff;border-color:var(--ink);}
+  button[disabled]{opacity:.4;cursor:not-allowed;}
+  .empty{font-size:12.5px;color:var(--ink-soft);padding:16px;text-align:center;}
+</style>
+</head>
+<body>
+  <h2>Choose a worksheet</h2>
+  <p class="hint">SuperTable reads this worksheet's data (dimensions, measures, and any date field) and builds its own interactive table on top of it.</p>
+  <div class="list" id="list"><div class="empty">Loading worksheets…</div></div>
+  <div class="actions">
+    <button id="btnCancel">Cancel</button>
+    <button class="primary" id="btnSave" disabled>Save</button>
+  </div>
+
+<script src="https://extensions.tableau.com/api/tableau.extensions.1.latest.js"></script>
+<script>
+(function(){
+  "use strict";
+  let selected = null;
+
+  tableau.extensions.initializeDialogAsync().then(function(){
+    const dashboard = tableau.extensions.dashboardContent.dashboard;
+    const worksheets = dashboard.worksheets;
+    const current = tableau.extensions.settings.get('worksheetName');
+    const list = document.getElementById('list');
+
+    if(!worksheets || worksheets.length === 0){
+      list.innerHTML = '<div class="empty">No worksheets found on this dashboard.</div>';
+      return;
+    }
+
+    list.innerHTML = worksheets.map(function(w, i){
+      const checked = (current ? w.name === current : i === 0);
+      if(checked) selected = w.name;
+      return '<label class="'+(checked?'active':'')+'" data-name="'+w.name.replace(/"/g,'&quot;')+'">'+
+        '<input type="radio" name="ws" value="'+w.name.replace(/"/g,'&quot;')+'" '+(checked?'checked':'')+'>'+
+        w.name+
+      '</label>';
+    }).join('');
+
+    document.getElementById('btnSave').disabled = !selected;
+
+    list.querySelectorAll('label').forEach(function(lbl){
+      lbl.addEventListener('click', function(){
+        selected = lbl.getAttribute('data-name');
+        list.querySelectorAll('label').forEach(function(l){ l.classList.toggle('active', l===lbl); });
+        list.querySelectorAll('input[type=radio]').forEach(function(r){ r.checked = (r.value === selected); });
+        document.getElementById('btnSave').disabled = false;
+      });
+    });
+  }).catch(function(err){
+    document.getElementById('list').innerHTML = '<div class="empty">Could not load worksheets: '+err.message+'</div>';
+  });
+
+  document.getElementById('btnSave').addEventListener('click', function(){
+    if(!selected) return;
+    tableau.extensions.settings.set('worksheetName', selected);
+    tableau.extensions.settings.saveAsync().then(function(){
+      tableau.extensions.ui.closeDialog(selected);
+    });
+  });
+
+  document.getElementById('btnCancel').addEventListener('click', function(){
+    tableau.extensions.ui.closeDialog('');
+  });
+})();
+</script>
+</body>
+</html>
