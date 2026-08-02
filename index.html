@@ -15239,7 +15239,12 @@ window.tableau = __webpack_exports__;
       render();
     }catch(err){
       console.error(err);
-      showError((err && err.message) || 'Something went wrong loading data from Tableau.');
+      const msg = (err && err.message) || String(err);
+      if(/invalid-parameter|range: \[0\.\.0\)/i.test(msg)){
+        showError('This worksheet doesn\'t have any fields on the Marks card yet. Drag at least one dimension or measure onto the Detail tile (Marks card), then click Retry.');
+      } else {
+        showError(msg || 'Something went wrong loading data from Tableau.');
+      }
     }
   }
 
