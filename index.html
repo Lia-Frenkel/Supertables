@@ -166,7 +166,6 @@
     <h1><span class="mark">S</span>SuperTable</h1>
     <div class="right">
       <span class="sub" id="worksheetLabel"></span>
-      <button class="cfgbtn" id="btnConfigureInline">⚙ Configure</button>
     </div>
   </div>
 
@@ -1262,20 +1261,9 @@
   }
 
   /* ============================================================
-     13. TABLEAU BOOTSTRAP
+     13. TABLEAU BOOTSTRAP (Viz Extension)
   ============================================================ */
   let currentWorksheet = null;
-
-  function configure(){
-    const popupUrl = window.location.href.replace(/index\.html.*$/, 'config.html');
-    tableau.extensions.ui.displayDialogAsync(popupUrl, '', {height:340, width:420}).then(()=>{
-      boot();
-    }).catch(err=>{
-      if(!err || err.errorCode !== tableau.ErrorCodes.DialogClosedByUser){
-        console.error('Configure dialog error:', err);
-      }
-    });
-  }
 
   function showError(message){
     document.getElementById('loadingScreen').classList.add('hidden');
@@ -1289,11 +1277,11 @@
     document.getElementById('appRoot').classList.add('hidden');
     document.getElementById('loadingScreen').classList.remove('hidden');
     try{
-      const dashboard = tableau.extensions.dashboardContent.dashboard;
-      let worksheetName = tableau.extensions.settings.get('worksheetName');
-      if(!worksheetName && dashboard.worksheets.length){ worksheetName = dashboard.worksheets[0].name; }
-      currentWorksheet = dashboard.worksheets.find(w=>w.name===worksheetName);
-      if(!currentWorksheet){ showError('No worksheet is configured yet. Click Configure to choose one.'); return; }
+      // Viz extensions live inside a single worksheet's Marks card — no worksheet picker needed.
+      // Data comes from whatever fields are placed on the Marks card (Detail/Tooltip tiles by
+      // default, since this manifest declares no custom <encoding> tiles).
+      currentWorksheet = tableau.extensions.worksheetContent.worksheet;
+      if(!currentWorksheet){ showError('Could not access the worksheet this extension is attached to.'); return; }
 
       const dataTable = await fetchWorksheetData(currentWorksheet);
       const schemaInfo = buildSchemaAndRows(dataTable);
@@ -1303,7 +1291,7 @@
       state = defaultState();
       if(schemaInfo.dateRangeDefault) state.dateRange = schemaInfo.dateRangeDefault;
 
-      document.getElementById('worksheetLabel').textContent = 'Worksheet: '+currentWorksheet.name;
+      document.getElementById('worksheetLabel').textContent = currentWorksheet.name ? ('Worksheet: '+currentWorksheet.name) : '';
       document.getElementById('loadingScreen').classList.add('hidden');
       document.getElementById('appRoot').classList.remove('hidden');
 
@@ -1336,12 +1324,15 @@
     }, 150);
   }
 
-  document.getElementById('btnConfigureInline').addEventListener('click', configure);
   document.getElementById('btnRetry').addEventListener('click', boot);
 
-  tableau.extensions.initializeAsync({configure: configure}).then(boot).catch(err=>{
-    showError('Failed to initialize the Tableau Extensions API: '+(err && err.message ? err.message : err));
-  });
+  if(typeof tableau === 'undefined' || !tableau.extensions){
+    showError('The Tableau Extensions API script did not load. Check that https://extensions.tableau.com/api/tableau.extensions.1.latest.js is reachable, and that this page was opened inside Tableau (not directly in a browser).');
+  } else {
+    tableau.extensions.initializeAsync().then(boot).catch(err=>{
+      showError('Failed to initialize the Tableau Extensions API: '+(err && err.message ? err.message : err));
+    });
+  }
 })();
 </script>
 </body>
