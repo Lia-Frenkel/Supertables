@@ -15233,8 +15233,12 @@ window.tableau = __webpack_exports__;
       document.getElementById('appRoot').classList.remove('hidden');
 
       // Re-fetch when the underlying view changes
-      currentWorksheet.addEventListener(tableau.TableauEventType.FilterChanged, refreshData);
-      currentWorksheet.addEventListener(tableau.TableauEventType.ParameterChanged, refreshData);
+      // Not every event type is supported for a viz extension's worksheet — register each
+      // defensively so one unsupported type doesn't take down the whole boot sequence.
+      try{ currentWorksheet.addEventListener(tableau.TableauEventType.FilterChanged, refreshData); }
+      catch(e){ console.warn('FilterChanged listener not supported here:', e); }
+      try{ currentWorksheet.addEventListener(tableau.TableauEventType.ParameterChanged, refreshData); }
+      catch(e){ console.warn('ParameterChanged listener not supported here:', e); }
 
       render();
     }catch(err){
