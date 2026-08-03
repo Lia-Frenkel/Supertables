@@ -166,8 +166,6 @@
   <div class="card">
     <div class="daterange-bar hidden" id="daterangeBar"></div>
     <div class="toolbar" id="toolbar">
-      <button class="btn primary" id="btnConfigureFields">⚙ Configure Fields</button>
-      <div class="divider"></div>
       <div class="search">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input type="text" id="searchInput" placeholder="Search table…">
@@ -15334,66 +15332,6 @@ window.tableau = __webpack_exports__;
     return ['dimension','exclude'];
   }
 
-  function openConfigureFieldsModal(){
-    if(!lastDataTable){ showToast('No data loaded yet — add fields to the Detail tile on the Marks card first.'); return; }
-    const layer = document.getElementById('modalLayer');
-    const rows = lastDataTable.columns.map(c=>{
-      const parsed = stripWrapper(c.fieldName);
-      const current = effectiveRole(c.fieldName, c.dataType);
-      return {fieldName:c.fieldName, bare:parsed.bare, dataType:c.dataType, current};
-    });
-    layer.innerHTML =
-      '<div class="modal-backdrop" id="cfgBackdrop"><div class="modal" style="width:480px;max-height:80vh;display:flex;flex-direction:column;">'+
-        '<h3>Configure Fields</h3>'+
-        '<p class="hint">Every field currently on the Marks card\'s Detail tile, and what SuperTable treats it as. Change any field marked wrong — e.g. a numeric ID that should be a Dimension, not a Measure.</p>'+
-        '<div style="overflow:auto;flex:1;border:1px solid var(--line);border-radius:8px;margin-top:4px;">'+
-          '<table style="width:100%;border-collapse:collapse;font-size:12.5px;">'+
-            '<thead><tr style="background:#FAFAFC;">'+
-              '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);border-bottom:1px solid var(--line);">Field</th>'+
-              '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);border-bottom:1px solid var(--line);">Type</th>'+
-              '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);border-bottom:1px solid var(--line);">Role</th>'+
-            '</tr></thead>'+
-            '<tbody>'+
-            rows.map((r,i)=>{
-              const opts = roleOptionsFor(r.dataType);
-              return '<tr>'+
-                '<td style="padding:6px 9px;border-bottom:1px solid var(--line);font-weight:500;">'+escapeHtml(r.bare)+'</td>'+
-                '<td style="padding:6px 9px;border-bottom:1px solid var(--line);color:var(--ink-soft);">'+escapeHtml(r.dataType)+'</td>'+
-                '<td style="padding:6px 9px;border-bottom:1px solid var(--line);">'+
-                  '<select data-field="'+escapeAttr(r.fieldName)+'" data-role-select style="width:100%;font-size:12px;padding:4px 5px;border:1px solid var(--line);border-radius:6px;">'+
-                    opts.map(o=>'<option value="'+o+'" '+(o===r.current?'selected':'')+'>'+ROLE_LABEL[o]+'</option>').join('')+
-                  '</select>'+
-                '</td>'+
-              '</tr>';
-            }).join('')+
-            '</tbody>'+
-          '</table>'+
-        '</div>'+
-        '<div class="actions"><button class="btn" id="cfgCancel">Cancel</button><button class="btn primary" id="cfgSave">Save & Apply</button></div>'+
-      '</div></div>';
-    document.getElementById('cfgBackdrop').addEventListener('click', e=>{ if(e.target.id==='cfgBackdrop') layer.innerHTML=''; });
-    document.getElementById('cfgCancel').addEventListener('click', ()=> layer.innerHTML='');
-    document.getElementById('cfgSave').addEventListener('click', ()=>{
-      const map = {};
-      layer.querySelectorAll('[data-role-select]').forEach(sel=>{
-        map[sel.getAttribute('data-field')] = sel.value;
-      });
-      fieldRoleOverrides = map;
-      saveFieldRoleOverrides(map).then(()=>{
-        layer.innerHTML='';
-        const schemaInfo = buildSchemaAndRows(lastDataTable);
-        DATA_BOUNDS.min = schemaInfo.dataMinIso;
-        DATA_BOUNDS.max = schemaInfo.dataMaxIso;
-        state = defaultState();
-        if(schemaInfo.dateRangeDefault) state.dateRange = schemaInfo.dateRangeDefault;
-        applySavedDefaults(loadSavedDefaults());
-        render();
-        showToast('Fields updated');
-      });
-    });
-  }
-  document.getElementById('btnConfigureFields').addEventListener('click', openConfigureFieldsModal);
-
   let tableauFiltersCache = [];
   function refreshTableauFilters(){
     if(!currentWorksheet || !currentWorksheet.getFiltersAsync) return Promise.resolve();
@@ -15569,16 +15507,36 @@ window.tableau = __webpack_exports__;
   // entry point (right-click the extension while editing), never surfaced in the viewer-facing UI.
   function openConfigureDialog(){
     const editorFormulas = state ? state.formulas.filter(f=>f.isEditorDefault) : [];
+    const fields = lastDataTable ? lastDataTable.columns.map(c=>{
+      const parsed = stripWrapper(c.fieldName);
+      return {fieldName:c.fieldName, bare:parsed.bare, dataType:c.dataType, current: effectiveRole(c.fieldName, c.dataType)};
+    }) : [];
     const payload = JSON.stringify({
       formulas: editorFormulas.map(f=>({name:f.label, expr:idsToBracketExpr(f.expr), format:f.format})),
-      availableFieldNames: DEFAULT_VALUE_COLUMNS.map(c=>c.label)
+      availableFieldNames: DEFAULT_VALUE_COLUMNS.map(c=>c.label),
+      fields: fields
     });
     const popupUrl = location.origin + location.pathname + '?dialog=configure';
-    tableau.extensions.ui.displayDialogAsync(popupUrl, payload, {height:640, width:600}).then(closePayload=>{
+    tableau.extensions.ui.displayDialogAsync(popupUrl, payload, {height:680, width:640}).then(closePayload=>{
       let result;
       try{ result = JSON.parse(closePayload); }catch(e){ return; }
       if(!result || result.cancelled) return;
-      applyEditorFormulas(result.formulas || []);
+      if(result.fieldRoles && fields.length){
+        fieldRoleOverrides = result.fieldRoles;
+        saveFieldRoleOverrides(fieldRoleOverrides).then(()=>{
+          if(lastDataTable){
+            const schemaInfo = buildSchemaAndRows(lastDataTable);
+            DATA_BOUNDS.min = schemaInfo.dataMinIso;
+            DATA_BOUNDS.max = schemaInfo.dataMaxIso;
+            state = defaultState();
+            if(schemaInfo.dateRangeDefault) state.dateRange = schemaInfo.dateRangeDefault;
+            applySavedDefaults(loadSavedDefaults());
+          }
+          applyEditorFormulas(result.formulas || []);
+        });
+      } else {
+        applyEditorFormulas(result.formulas || []);
+      }
     }).catch(err=>{
       if(!err || err.errorCode !== tableau.ErrorCodes.DialogClosedByUser){
         console.error('Configure dialog error:', err);
@@ -15620,10 +15578,23 @@ window.tableau = __webpack_exports__;
 
   function renderConfigureDialogUI(initial){
     const availableNames = initial.availableFieldNames || [];
+    const fieldRows = initial.fields || [];
     const rows = (initial.formulas || []).map(f=>({name:f.name||'', expr:f.expr||'', format:f.format||'decimalx'}));
     const root = document.getElementById('cfgDialogRoot');
     const FORMAT_LABEL = {decimalx:'Decimal', currency:'Currency', percent:'Percent', number:'Number'};
 
+    function fieldRowHtml(f,i){
+      const opts = roleOptionsFor(f.dataType);
+      return '<tr>'+
+        '<td style="padding:6px 9px;border-bottom:1px solid #E6E6EE;font-weight:500;">'+escapeHtml(f.bare)+'</td>'+
+        '<td style="padding:6px 9px;border-bottom:1px solid #E6E6EE;color:#565A7E;">'+escapeHtml(f.dataType)+'</td>'+
+        '<td style="padding:6px 9px;border-bottom:1px solid #E6E6EE;">'+
+          '<select id="cfgRole'+i+'" data-field="'+escapeAttr(f.fieldName)+'" style="width:100%;font-size:12px;padding:4px 5px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+            opts.map(o=>'<option value="'+o+'" '+(o===f.current?'selected':'')+'>'+ROLE_LABEL[o]+'</option>').join('')+
+          '</select>'+
+        '</td>'+
+      '</tr>';
+    }
     function rowHtml(r,i){
       return '<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:8px;padding:10px;border:1px solid #E6E6EE;border-radius:10px;background:#FAFAFC;">'+
         '<div style="flex:1;min-width:0;">'+
@@ -15645,11 +15616,29 @@ window.tableau = __webpack_exports__;
     function renderRows(){
       root.innerHTML =
         '<div style="padding:18px;">'+
-          '<h2 style="margin:0 0 4px;font-size:16px;color:#1F2152;">Configure Calculated Fields</h2>'+
-          '<p style="margin:0 0 14px;font-size:12px;color:#565A7E;">These formulas are visible to everyone who views this table — end users never see this screen. Reference native measures exactly as named, in [brackets].</p>'+
+          '<h2 style="margin:0 0 4px;font-size:16px;color:#1F2152;">Configure SuperTable</h2>'+
+          '<p style="margin:0 0 16px;font-size:12px;color:#565A7E;">Editor-only settings — end users never see this screen.</p>'+
+
+          '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Field Roles</h3>'+
+          '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Every field currently on the Marks card, and what SuperTable treats it as. Fix anything wrong here — e.g. a numeric ID that should be a Dimension, not a Measure.</p>'+
+          (fieldRows.length
+            ? '<div style="max-height:180px;overflow:auto;border:1px solid #E6E6EE;border-radius:8px;margin-bottom:18px;">'+
+                '<table style="width:100%;border-collapse:collapse;font-size:12.5px;">'+
+                  '<thead><tr style="background:#FAFAFC;">'+
+                    '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;border-bottom:1px solid #E6E6EE;">Field</th>'+
+                    '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;border-bottom:1px solid #E6E6EE;">Type</th>'+
+                    '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;border-bottom:1px solid #E6E6EE;">Role</th>'+
+                  '</tr></thead>'+
+                  '<tbody>'+fieldRows.map((f,i)=>fieldRowHtml(f,i)).join('')+'</tbody>'+
+                '</table>'+
+              '</div>'
+            : '<p style="font-size:12px;color:#C2255C;margin-bottom:18px;">No fields detected yet — add fields to the Detail tile on the Marks card, then reopen this dialog.</p>')+
+
+          '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Calculated Fields</h3>'+
+          '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Reference native measures exactly as named, in [brackets].</p>'+
           (availableNames.length
             ? '<div style="margin-bottom:14px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#9094AD;font-weight:600;margin-bottom:5px;">Available measures</div><div style="display:flex;flex-wrap:wrap;gap:5px;">'+availableNames.map(n=>'<span style="font-size:11px;background:#EEEBFC;color:#4A3DD6;padding:2px 8px;border-radius:999px;">'+escapeHtml(n)+'</span>').join('')+'</div></div>'
-            : '<p style="font-size:12px;color:#C2255C;">No native measures detected yet — add fields to the Detail tile on the Marks card, then reopen this dialog.</p>')+
+            : '')+
           '<div id="cfgRows">'+(rows.map((r,i)=>rowHtml(r,i)).join('') || '<p style="font-size:12px;color:#9094AD;">No calculated fields yet — click "+ Add Formula" below.</p>')+'</div>'+
           '<button id="cfgAddRow" style="margin-top:6px;font-size:12.5px;font-weight:600;color:#4A3DD6;background:#EEEBFC;border:1px solid #D9D9FF;border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;">+ Add Formula</button>'+
           '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px;border-top:1px solid #E6E6EE;padding-top:14px;">'+
@@ -15682,7 +15671,12 @@ window.tableau = __webpack_exports__;
           clean.push({name, expr, format:r.format||'decimalx'});
         });
         if(hasError){ window.alert('Fix the highlighted rows before saving.'); return; }
-        tableau.extensions.ui.closeDialog(JSON.stringify({cancelled:false, formulas:clean}));
+        const fieldRoles = {};
+        fieldRows.forEach((f,i)=>{
+          const sel = document.getElementById('cfgRole'+i);
+          if(sel) fieldRoles[sel.getAttribute('data-field')] = sel.value;
+        });
+        tableau.extensions.ui.closeDialog(JSON.stringify({cancelled:false, formulas:clean, fieldRoles:fieldRoles}));
       });
     }
     renderRows();
