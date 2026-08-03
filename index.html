@@ -166,6 +166,8 @@
   <div class="card">
     <div class="daterange-bar hidden" id="daterangeBar"></div>
     <div class="toolbar" id="toolbar">
+      <button class="btn primary" id="btnConfigureFields">⚙ Configure Fields</button>
+      <div class="divider"></div>
       <div class="search">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input type="text" id="searchInput" placeholder="Search table…">
@@ -14268,19 +14270,41 @@ window.tableau = __webpack_exports__;
     return await worksheet.getSummaryDataAsync({ignoreSelection:true});
   }
 
+  // Since Marks-card custom encodings didn't render reliably, field roles (Dimension / Measure /
+  // Date / Exclude) are assigned inside the extension itself via the ⚙ Configure Fields modal,
+  // rather than by which Marks-card tile a field was dropped on. Everything just needs to be on
+  // the (always-present) Detail tile; this map — persisted via tableau.extensions.settings — is
+  // what actually decides each field's role.
+  let fieldRoleOverrides = {};
+  let lastDataTable = null;
+
+  function autoRoleForType(dataType){
+    if(dataType==='date' || dataType==='date-time') return 'date';
+    if(dataType==='int' || dataType==='float') return 'measure';
+    return 'dimension';
+  }
+  function effectiveRole(fieldName, dataType){
+    const o = fieldRoleOverrides[fieldName];
+    if(o && o!=='auto') return o;
+    return autoRoleForType(dataType);
+  }
+
   function buildSchemaAndRows(dataTable){
+    lastDataTable = dataTable;
     const makeId = makeIdFactory();
     const cols = dataTable.columns.map(c=>({
       index: c.index,
       fieldName: c.fieldName,
       id: makeId(c.fieldName),
       dataType: c.dataType,
-      isMeasure: (c.dataType==='int' || c.dataType==='float')
+      role: effectiveRole(c.fieldName, c.dataType)
     }));
 
-    const dateField = cols.find(c=> !c.isMeasure && (c.dataType==='date' || c.dataType==='date-time'));
-    const categoricalDims = cols.filter(c=> !c.isMeasure && c!==dateField);
-    const measures = cols.filter(c=> c.isMeasure);
+    // Only the first field with an effective role of "date" becomes the actual date field —
+    // any additional ones fall through to the dimension list below instead of being dropped.
+    const dateField = cols.find(c=> c.role==='date');
+    const measures = cols.filter(c=> c.role==='measure');
+    const categoricalDims = cols.filter(c=> c!==dateField && c.role!=='measure' && c.role!=='exclude');
 
     DATE_FIELD_ID = dateField ? dateField.id : null;
     DIM_META = {};
@@ -14299,7 +14323,7 @@ window.tableau = __webpack_exports__;
         const cell = row[f.index];
         if(f === dateField){
           obj[f.id] = toJsDate(cell.value, cell.formattedValue);
-        } else if(f.isMeasure){
+        } else if(f.role==='measure'){
           const n = Number(cell.value);
           obj[f.id] = isNaN(n) ? 0 : n;
         } else {
@@ -15295,6 +15319,84 @@ window.tableau = __webpack_exports__;
   // still persist a layout by checking "Make this a default calculated field" in the ƒ Formula
   // dialog, which calls saveDefaultsFromCurrentState() itself.
 
+  function loadFieldRoleOverrides(){
+    try{
+      const raw = tableau.extensions.settings.get('fieldRoleOverrides');
+      return raw ? JSON.parse(raw) : {};
+    }catch(e){ return {}; }
+  }
+  function saveFieldRoleOverrides(map){
+    tableau.extensions.settings.set('fieldRoleOverrides', JSON.stringify(map));
+    return tableau.extensions.settings.saveAsync();
+  }
+
+  const ROLE_LABEL = {dimension:'Dimension', measure:'Measure', date:'Date', exclude:'Exclude'};
+  function roleOptionsFor(dataType){
+    if(dataType==='date' || dataType==='date-time') return ['date','dimension','exclude'];
+    if(dataType==='int' || dataType==='float') return ['measure','dimension','exclude'];
+    return ['dimension','exclude'];
+  }
+
+  function openConfigureFieldsModal(){
+    if(!lastDataTable){ showToast('No data loaded yet — add fields to the Detail tile on the Marks card first.'); return; }
+    const layer = document.getElementById('modalLayer');
+    const rows = lastDataTable.columns.map(c=>{
+      const parsed = stripWrapper(c.fieldName);
+      const current = effectiveRole(c.fieldName, c.dataType);
+      return {fieldName:c.fieldName, bare:parsed.bare, dataType:c.dataType, current};
+    });
+    layer.innerHTML =
+      '<div class="modal-backdrop" id="cfgBackdrop"><div class="modal" style="width:480px;max-height:80vh;display:flex;flex-direction:column;">'+
+        '<h3>Configure Fields</h3>'+
+        '<p class="hint">Every field currently on the Marks card\'s Detail tile, and what SuperTable treats it as. Change any field marked wrong — e.g. a numeric ID that should be a Dimension, not a Measure.</p>'+
+        '<div style="overflow:auto;flex:1;border:1px solid var(--line);border-radius:8px;margin-top:4px;">'+
+          '<table style="width:100%;border-collapse:collapse;font-size:12.5px;">'+
+            '<thead><tr style="background:#FAFAFC;">'+
+              '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);border-bottom:1px solid var(--line);">Field</th>'+
+              '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);border-bottom:1px solid var(--line);">Type</th>'+
+              '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);border-bottom:1px solid var(--line);">Role</th>'+
+            '</tr></thead>'+
+            '<tbody>'+
+            rows.map((r,i)=>{
+              const opts = roleOptionsFor(r.dataType);
+              return '<tr>'+
+                '<td style="padding:6px 9px;border-bottom:1px solid var(--line);font-weight:500;">'+escapeHtml(r.bare)+'</td>'+
+                '<td style="padding:6px 9px;border-bottom:1px solid var(--line);color:var(--ink-soft);">'+escapeHtml(r.dataType)+'</td>'+
+                '<td style="padding:6px 9px;border-bottom:1px solid var(--line);">'+
+                  '<select data-field="'+escapeAttr(r.fieldName)+'" data-role-select style="width:100%;font-size:12px;padding:4px 5px;border:1px solid var(--line);border-radius:6px;">'+
+                    opts.map(o=>'<option value="'+o+'" '+(o===r.current?'selected':'')+'>'+ROLE_LABEL[o]+'</option>').join('')+
+                  '</select>'+
+                '</td>'+
+              '</tr>';
+            }).join('')+
+            '</tbody>'+
+          '</table>'+
+        '</div>'+
+        '<div class="actions"><button class="btn" id="cfgCancel">Cancel</button><button class="btn primary" id="cfgSave">Save & Apply</button></div>'+
+      '</div></div>';
+    document.getElementById('cfgBackdrop').addEventListener('click', e=>{ if(e.target.id==='cfgBackdrop') layer.innerHTML=''; });
+    document.getElementById('cfgCancel').addEventListener('click', ()=> layer.innerHTML='');
+    document.getElementById('cfgSave').addEventListener('click', ()=>{
+      const map = {};
+      layer.querySelectorAll('[data-role-select]').forEach(sel=>{
+        map[sel.getAttribute('data-field')] = sel.value;
+      });
+      fieldRoleOverrides = map;
+      saveFieldRoleOverrides(map).then(()=>{
+        layer.innerHTML='';
+        const schemaInfo = buildSchemaAndRows(lastDataTable);
+        DATA_BOUNDS.min = schemaInfo.dataMinIso;
+        DATA_BOUNDS.max = schemaInfo.dataMaxIso;
+        state = defaultState();
+        if(schemaInfo.dateRangeDefault) state.dateRange = schemaInfo.dateRangeDefault;
+        applySavedDefaults(loadSavedDefaults());
+        render();
+        showToast('Fields updated');
+      });
+    });
+  }
+  document.getElementById('btnConfigureFields').addEventListener('click', openConfigureFieldsModal);
+
   let tableauFiltersCache = [];
   function refreshTableauFilters(){
     if(!currentWorksheet || !currentWorksheet.getFiltersAsync) return Promise.resolve();
@@ -15370,12 +15472,14 @@ window.tableau = __webpack_exports__;
     document.getElementById('loadingScreen').classList.remove('hidden');
     try{
       // Viz extensions live inside a single worksheet's Marks card — no worksheet picker needed.
-      // Data comes from whatever fields are placed on the Marks card (Detail/Tooltip tiles by
-      // default, since this manifest declares no custom <encoding> tiles).
+      // Data comes from whatever fields are placed on the Detail tile; field roles (Dimension/
+      // Measure/Date/Exclude) are then assigned in-app via ⚙ Configure Fields, not by which
+      // Marks-card tile a field landed on (custom encoding tiles didn't render reliably).
       currentWorksheet = tableau.extensions.worksheetContent.worksheet;
       if(!currentWorksheet){ showError('Could not access the worksheet this extension is attached to.'); return; }
 
       isAuthoring = !!(tableau.extensions.environment && tableau.extensions.environment.mode === tableau.ExtensionMode.Authoring);
+      fieldRoleOverrides = loadFieldRoleOverrides();
 
       const dataTable = await fetchWorksheetData(currentWorksheet);
       const schemaInfo = buildSchemaAndRows(dataTable);
