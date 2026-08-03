@@ -163,14 +163,6 @@
 </div>
 
 <div class="app hidden" id="appRoot">
-  <div class="masthead">
-    <h1><span class="mark">S</span>SuperTable</h1>
-    <div class="right">
-      <span class="sub" id="worksheetLabel"></span>
-      <button class="cfgbtn hidden" id="btnSaveDefault">💾 Save as Default</button>
-    </div>
-  </div>
-
   <div class="card">
     <div class="daterange-bar hidden" id="daterangeBar"></div>
     <div class="toolbar" id="toolbar">
@@ -15299,7 +15291,9 @@ window.tableau = __webpack_exports__;
     tableau.extensions.settings.set('supertableDefaults', JSON.stringify(payload));
     tableau.extensions.settings.saveAsync().then(()=> showToast('Saved as default for all viewers'));
   }
-  document.getElementById('btnSaveDefault').addEventListener('click', saveDefaultsFromCurrentState);
+  // Note: the "Save as Default" toolbar button was removed along with the masthead — editors can
+  // still persist a layout by checking "Make this a default calculated field" in the ƒ Formula
+  // dialog, which calls saveDefaultsFromCurrentState() itself.
 
   let tableauFiltersCache = [];
   function refreshTableauFilters(){
@@ -15382,7 +15376,6 @@ window.tableau = __webpack_exports__;
       if(!currentWorksheet){ showError('Could not access the worksheet this extension is attached to.'); return; }
 
       isAuthoring = !!(tableau.extensions.environment && tableau.extensions.environment.mode === tableau.ExtensionMode.Authoring);
-      document.getElementById('btnSaveDefault').classList.toggle('hidden', !isAuthoring);
 
       const dataTable = await fetchWorksheetData(currentWorksheet);
       const schemaInfo = buildSchemaAndRows(dataTable);
@@ -15393,7 +15386,6 @@ window.tableau = __webpack_exports__;
       if(schemaInfo.dateRangeDefault) state.dateRange = schemaInfo.dateRangeDefault;
       applySavedDefaults(loadSavedDefaults());
 
-      document.getElementById('worksheetLabel').textContent = currentWorksheet.name ? ('Worksheet: '+currentWorksheet.name) : '';
       document.getElementById('loadingScreen').classList.add('hidden');
       document.getElementById('appRoot').classList.remove('hidden');
 
