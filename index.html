@@ -14383,7 +14383,6 @@ window.tableau = __webpack_exports__;
   }
   let state = null;
   let chartInstance = null;
-  let isAuthoring = false;
 
   function getWidth(id){ return state.colWidths[id]!==undefined ? state.colWidths[id] : (DEFAULT_WIDTHS[id]||120); }
   function setColWidth(id,w){ state.colWidths[id]=w; }
@@ -15049,7 +15048,6 @@ window.tableau = __webpack_exports__;
         '<label>Expression</label><input type="text" id="formulaExpr" placeholder="e.g. ['+(names[0]||'Field A')+'] / ['+(names[1]||'Field B')+']">'+
         '<div class="tokens">'+names.map(n=>'<span class="tok" data-tok="'+escapeAttr(n)+'">'+escapeHtml(n)+'</span>').join('')+'</div>'+
         '<label>Format</label><select id="formulaFormat"><option value="decimalx">Decimal (2.00)</option><option value="currency">Currency ($)</option><option value="percent">Percent (%)</option><option value="number">Number</option></select>'+
-        (isAuthoring ? '<label class="dr-check" style="margin-top:10px;"><input type="checkbox" id="formulaIsDefault"> Make this a default calculated field for all viewers</label>' : '')+
         '<div class="err" id="formulaErr"></div>'+
         '<div class="actions"><button class="btn" id="formulaCancel">Cancel</button><button class="btn primary" id="formulaAdd">Add Column</button></div>'+
       '</div></div>';
@@ -15062,7 +15060,6 @@ window.tableau = __webpack_exports__;
       const name = document.getElementById('formulaName').value.trim();
       const exprRaw = document.getElementById('formulaExpr').value.trim();
       const format = document.getElementById('formulaFormat').value;
-      const asDefault = isAuthoring && document.getElementById('formulaIsDefault') && document.getElementById('formulaIsDefault').checked;
       const errEl = document.getElementById('formulaErr');
       if(!name){ errEl.textContent='Give the formula a name.'; return; }
       if(!exprRaw){ errEl.textContent='Enter an expression.'; return; }
@@ -15073,8 +15070,8 @@ window.tableau = __webpack_exports__;
       const test = safeEval(resolved, testScope);
       if(test===null){ errEl.textContent='Could not evaluate this expression — check field references.'; return; }
       const id = 'f_'+name.toLowerCase().replace(/[^a-z0-9]+/g,'_')+'_'+Date.now().toString(36);
-      state.formulas.push({id, label:name, expr:resolved, format, isEditorDefault:!!asDefault});
-      state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format, visible:true, isEditorDefault:!!asDefault});
+      state.formulas.push({id, label:name, expr:resolved, format});
+      state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format, visible:true});
       state.columnOrder.push(id);
       layer.innerHTML=''; render();
       if(asDefault) saveDefaultsFromCurrentState();
@@ -15478,7 +15475,6 @@ window.tableau = __webpack_exports__;
       currentWorksheet = tableau.extensions.worksheetContent.worksheet;
       if(!currentWorksheet){ showError('Could not access the worksheet this extension is attached to.'); return; }
 
-      isAuthoring = !!(tableau.extensions.environment && tableau.extensions.environment.mode === tableau.ExtensionMode.Authoring);
       fieldRoleOverrides = loadFieldRoleOverrides();
 
       const dataTable = await fetchWorksheetData(currentWorksheet);
@@ -15536,10 +15532,174 @@ window.tableau = __webpack_exports__;
 
   document.getElementById('btnRetry').addEventListener('click', boot);
 
-  if(typeof tableau === 'undefined' || !tableau.extensions){
+  // Converts an already-resolved (id-based) formula expression back into the
+  // [Field Name] bracket form for display/editing — the inverse of resolveBracketExpr.
+  function idsToBracketExpr(expr){
+    return expr.replace(/[a-zA-Z_][a-zA-Z0-9_]*/g, tok=>{
+      const vc = state.valueColumns.find(c=>c.id===tok);
+      return vc ? '['+vc.label+']' : tok;
+    });
+  }
+
+  function applyEditorFormulas(formulaDefs){
+    if(!state) return;
+    const oldIds = state.formulas.filter(f=>f.isEditorDefault).map(f=>f.id);
+    state.formulas = state.formulas.filter(f=>!f.isEditorDefault);
+    state.valueColumns = state.valueColumns.filter(c=>!c.isEditorDefault);
+    state.columnOrder = state.columnOrder.filter(id=>!oldIds.includes(id));
+
+    formulaDefs.forEach(def=>{
+      const name = (def.name||'').trim();
+      const exprRaw = (def.expr||'').trim();
+      if(!name || !exprRaw) return;
+      const {resolved, error} = resolveBracketExpr(exprRaw);
+      if(error) return;
+      const testScope = {}; DEFAULT_VALUE_COLUMNS.forEach(c=>testScope[c.id]=1);
+      if(safeEval(resolved, testScope)===null) return;
+      const id = 'f_'+name.toLowerCase().replace(/[^a-z0-9]+/g,'_')+'_'+Date.now().toString(36)+Math.floor(Math.random()*1000);
+      state.formulas.push({id, label:name, expr:resolved, format:def.format||'decimalx', isEditorDefault:true});
+      state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format:def.format||'decimalx', visible:true, isEditorDefault:true});
+      state.columnOrder.push(id);
+    });
+    saveDefaultsFromCurrentState();
+    render();
+  }
+
+  // Registered as the "configure" callback below — reachable only via Tableau's own Configure
+  // entry point (right-click the extension while editing), never surfaced in the viewer-facing UI.
+  function openConfigureDialog(){
+    const editorFormulas = state ? state.formulas.filter(f=>f.isEditorDefault) : [];
+    const payload = JSON.stringify({
+      formulas: editorFormulas.map(f=>({name:f.label, expr:idsToBracketExpr(f.expr), format:f.format})),
+      availableFieldNames: DEFAULT_VALUE_COLUMNS.map(c=>c.label)
+    });
+    const popupUrl = location.origin + location.pathname + '?dialog=configure';
+    tableau.extensions.ui.displayDialogAsync(popupUrl, payload, {height:640, width:600}).then(closePayload=>{
+      let result;
+      try{ result = JSON.parse(closePayload); }catch(e){ return; }
+      if(!result || result.cancelled) return;
+      applyEditorFormulas(result.formulas || []);
+    }).catch(err=>{
+      if(!err || err.errorCode !== tableau.ErrorCodes.DialogClosedByUser){
+        console.error('Configure dialog error:', err);
+      }
+    });
+  }
+
+  // ---- The dialog's own render path (this same file, opened with ?dialog=configure) ----
+  function validateExprSyntax(expr, availableNames){
+    if(!/^[a-zA-Z0-9_+\-*/().\s\[\]]+$/.test(expr)) return false;
+    const refs = expr.match(/\[([^\]]+)\]/g) || [];
+    for(const ref of refs){
+      const name = ref.slice(1,-1);
+      if(!availableNames.some(n=>n.toLowerCase()===name.toLowerCase())) return false;
+    }
+    let testExpr = expr;
+    availableNames.forEach(n=>{ testExpr = testExpr.split('['+n+']').join('1'); });
+    if(/\[[^\]]*\]/.test(testExpr)) return false;
+    try{
+      // eslint-disable-next-line no-new-func
+      const fn = new Function('return ('+testExpr+');');
+      const v = fn();
+      return typeof v === 'number' && isFinite(v);
+    }catch(e){ return false; }
+  }
+
+  function initConfigureDialog(){
+    document.body.innerHTML = '<div id="cfgDialogRoot"></div>';
+    document.body.style.margin = '0';
+    document.body.style.fontFamily = '"Helvetica Neue",Helvetica,Arial,sans-serif';
+    tableau.extensions.initializeDialogAsync().then(openPayload=>{
+      let initial = {};
+      try{ initial = JSON.parse(openPayload || '{}'); }catch(e){ /* start blank */ }
+      renderConfigureDialogUI(initial);
+    }).catch(err=>{
+      document.getElementById('cfgDialogRoot').innerHTML = '<div style="padding:20px;color:#C2255C;">Failed to initialize dialog: '+((err&&err.message)?err.message:err)+'</div>';
+    });
+  }
+
+  function renderConfigureDialogUI(initial){
+    const availableNames = initial.availableFieldNames || [];
+    const rows = (initial.formulas || []).map(f=>({name:f.name||'', expr:f.expr||'', format:f.format||'decimalx'}));
+    const root = document.getElementById('cfgDialogRoot');
+    const FORMAT_LABEL = {decimalx:'Decimal', currency:'Currency', percent:'Percent', number:'Number'};
+
+    function rowHtml(r,i){
+      return '<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:8px;padding:10px;border:1px solid #E6E6EE;border-radius:10px;background:#FAFAFC;">'+
+        '<div style="flex:1;min-width:0;">'+
+          '<input id="cfgName'+i+'" type="text" placeholder="Name (e.g. CPA)" value="'+escapeAttr(r.name)+'" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;margin-bottom:5px;box-sizing:border-box;font-family:inherit;">'+
+          '<input id="cfgExpr'+i+'" type="text" placeholder="e.g. [Cost] / [Total Leads]" value="'+escapeAttr(r.expr)+'" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;box-sizing:border-box;font-family:inherit;">'+
+          '<div id="cfgErr'+i+'" style="font-size:11px;color:#C2255C;min-height:14px;margin-top:3px;"></div>'+
+        '</div>'+
+        '<select id="cfgFormat'+i+'" style="font-size:12px;padding:6px 7px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+          Object.keys(FORMAT_LABEL).map(f=>'<option value="'+f+'" '+(r.format===f?'selected':'')+'>'+FORMAT_LABEL[f]+'</option>').join('')+
+        '</select>'+
+        '<button id="cfgRemove'+i+'" title="Remove" style="border:none;background:none;color:#9094AD;font-size:18px;cursor:pointer;line-height:1;padding:4px;">×</button>'+
+      '</div>';
+    }
+    function validateRow(r, errEl){
+      if(!errEl) return;
+      if(!r.expr){ errEl.textContent=''; return; }
+      errEl.textContent = validateExprSyntax(r.expr, availableNames) ? '' : 'Check field references and syntax';
+    }
+    function renderRows(){
+      root.innerHTML =
+        '<div style="padding:18px;">'+
+          '<h2 style="margin:0 0 4px;font-size:16px;color:#1F2152;">Configure Calculated Fields</h2>'+
+          '<p style="margin:0 0 14px;font-size:12px;color:#565A7E;">These formulas are visible to everyone who views this table — end users never see this screen. Reference native measures exactly as named, in [brackets].</p>'+
+          (availableNames.length
+            ? '<div style="margin-bottom:14px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#9094AD;font-weight:600;margin-bottom:5px;">Available measures</div><div style="display:flex;flex-wrap:wrap;gap:5px;">'+availableNames.map(n=>'<span style="font-size:11px;background:#EEEBFC;color:#4A3DD6;padding:2px 8px;border-radius:999px;">'+escapeHtml(n)+'</span>').join('')+'</div></div>'
+            : '<p style="font-size:12px;color:#C2255C;">No native measures detected yet — add fields to the Detail tile on the Marks card, then reopen this dialog.</p>')+
+          '<div id="cfgRows">'+(rows.map((r,i)=>rowHtml(r,i)).join('') || '<p style="font-size:12px;color:#9094AD;">No calculated fields yet — click "+ Add Formula" below.</p>')+'</div>'+
+          '<button id="cfgAddRow" style="margin-top:6px;font-size:12.5px;font-weight:600;color:#4A3DD6;background:#EEEBFC;border:1px solid #D9D9FF;border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;">+ Add Formula</button>'+
+          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px;border-top:1px solid #E6E6EE;padding-top:14px;">'+
+            '<button id="cfgDialogCancel" style="font-size:12.5px;font-weight:500;color:#1F2152;background:#fff;border:1px solid #E6E6EE;border-radius:8px;padding:7px 14px;cursor:pointer;font-family:inherit;">Cancel</button>'+
+            '<button id="cfgDialogSave" style="font-size:12.5px;font-weight:600;color:#fff;background:#5B4EE8;border:1px solid #5B4EE8;border-radius:8px;padding:7px 14px;cursor:pointer;font-family:inherit;">Save</button>'+
+          '</div>'+
+        '</div>';
+      rows.forEach((r,i)=>{
+        const nameEl = document.getElementById('cfgName'+i);
+        const exprEl = document.getElementById('cfgExpr'+i);
+        const fmtEl = document.getElementById('cfgFormat'+i);
+        const removeEl = document.getElementById('cfgRemove'+i);
+        const errEl = document.getElementById('cfgErr'+i);
+        if(nameEl) nameEl.addEventListener('input', ()=>{ r.name = nameEl.value; });
+        if(exprEl) exprEl.addEventListener('input', ()=>{ r.expr = exprEl.value; validateRow(r, errEl); });
+        if(fmtEl) fmtEl.addEventListener('change', ()=>{ r.format = fmtEl.value; });
+        if(removeEl) removeEl.addEventListener('click', ()=>{ rows.splice(i,1); renderRows(); });
+        validateRow(r, errEl);
+      });
+      document.getElementById('cfgAddRow').addEventListener('click', ()=>{ rows.push({name:'', expr:'', format:'decimalx'}); renderRows(); });
+      document.getElementById('cfgDialogCancel').addEventListener('click', ()=>{ tableau.extensions.ui.closeDialog(JSON.stringify({cancelled:true})); });
+      document.getElementById('cfgDialogSave').addEventListener('click', ()=>{
+        let hasError = false;
+        const clean = [];
+        rows.forEach(r=>{
+          const name = (r.name||'').trim();
+          const expr = (r.expr||'').trim();
+          if(!name && !expr) return;
+          if(!name || !expr || !validateExprSyntax(expr, availableNames)){ hasError = true; return; }
+          clean.push({name, expr, format:r.format||'decimalx'});
+        });
+        if(hasError){ window.alert('Fix the highlighted rows before saving.'); return; }
+        tableau.extensions.ui.closeDialog(JSON.stringify({cancelled:false, formulas:clean}));
+      });
+    }
+    renderRows();
+  }
+
+  const isDialogMode = /(^|[?&])dialog=configure(&|$)/.test(location.search);
+
+  if(isDialogMode){
+    if(typeof tableau === 'undefined' || !tableau.extensions){
+      document.body.innerHTML = '<div style="padding:20px;color:#C2255C;font-family:sans-serif;">The Tableau Extensions API script did not load.</div>';
+    } else {
+      initConfigureDialog();
+    }
+  } else if(typeof tableau === 'undefined' || !tableau.extensions){
     showError('The Tableau Extensions API script did not load. Check that tableau.extensions.1.latest.js is present in the same folder as index.html and is being served correctly, and that this page was opened inside Tableau (not directly in a browser).');
   } else {
-    tableau.extensions.initializeAsync().then(boot).catch(err=>{
+    tableau.extensions.initializeAsync({configure: openConfigureDialog}).then(boot).catch(err=>{
       showError('Failed to initialize the Tableau Extensions API: '+(err && err.message ? err.message : err));
     });
   }
