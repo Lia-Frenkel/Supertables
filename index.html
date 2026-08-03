@@ -124,6 +124,7 @@
   .popover .p-links{display:flex;gap:10px;padding:2px 8px 6px;}
   .popover .p-link{font-size:11px;color:var(--accent-ink);cursor:pointer;text-decoration:underline;}
   .popover select{width:calc(100% - 16px);margin:2px 8px 8px;font-size:12px;padding:6px 7px;border:1px solid var(--line);border-radius:5px;background:var(--paper);}
+  .popover input[type=number]{font-size:12.5px;padding:6px 7px;border:1px solid var(--line);border-radius:5px;background:var(--paper);}
   .popover hr{border:none;border-top:1px solid var(--line);margin:5px 2px;}
   .hidden{display:none !important;}
 
@@ -166,6 +167,7 @@
     <h1><span class="mark">S</span>SuperTable</h1>
     <div class="right">
       <span class="sub" id="worksheetLabel"></span>
+      <button class="cfgbtn hidden" id="btnSaveDefault">💾 Save as Default</button>
     </div>
   </div>
 
@@ -190,6 +192,7 @@
       <button class="btn" id="btnCopy">Copy with Headers</button>
       <button class="btn accentish" id="btnExport">Export CSV ⭳</button>
     </div>
+    <div class="topfilters" id="tableauFilters"></div>
     <div class="topfilters" id="topfilters"></div>
     <div class="pipeline" id="pipeline"></div>
   </div>
@@ -14245,6 +14248,15 @@ window.tableau = __webpack_exports__;
     return 'number';
   }
 
+  // Tableau reports a measure's pill caption as e.g. "SUM(Cost)" — this strips
+  // the wrapper so the column header can show just "Cost" (paired with our
+  // own small aggregation badge instead of a redundant textual prefix), while
+  // still capturing the real aggregation (SUM/AVG/CNTD/...) for that badge.
+  function stripWrapper(caption){
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)\((.*)\)$/.exec(caption);
+    return m ? {agg:m[1].toUpperCase(), bare:m[2]} : {agg:null, bare:caption};
+  }
+
   function toJsDate(cellValue, formattedValue){
     if(cellValue instanceof Date) return cellValue;
     const d = new Date(cellValue);
@@ -14280,7 +14292,7 @@ window.tableau = __webpack_exports__;
 
     DATE_FIELD_ID = dateField ? dateField.id : null;
     DIM_META = {};
-    categoricalDims.forEach(f=>{ DIM_META[f.id] = {label:f.fieldName}; });
+    categoricalDims.forEach(f=>{ DIM_META[f.id] = {label: stripWrapper(f.fieldName).bare}; });
     DIM_ORDER = categoricalDims.map(f=>f.id);
     if(dateField){ DIM_META['__period'] = {label:'Period'}; DIM_ORDER.push('__period'); }
     TOPFILTER_DIMS = categoricalDims.map(f=>f.id);
@@ -14308,7 +14320,8 @@ window.tableau = __webpack_exports__;
     DEFAULT_VALUE_COLUMNS = measures.map(f=>{
       const sampleRow = dataTable.data[0];
       const sample = sampleRow ? sampleRow[f.index].formattedValue : null;
-      return { id:f.id, label:f.fieldName, kind:'measure', agg:'SUM', format:inferFormat(sample), visible:true };
+      const parsed = stripWrapper(f.fieldName);
+      return { id:f.id, label:parsed.bare, kind:'measure', agg:(parsed.agg||'SUM'), format:inferFormat(sample), visible:true };
     });
     measures.forEach(f=>{ DEFAULT_WIDTHS[f.id] = Math.max(95, Math.min(160, f.fieldName.length*9+50)); });
 
@@ -14354,6 +14367,7 @@ window.tableau = __webpack_exports__;
   }
   let state = null;
   let chartInstance = null;
+  let isAuthoring = false;
 
   function getWidth(id){ return state.colWidths[id]!==undefined ? state.colWidths[id] : (DEFAULT_WIDTHS[id]||120); }
   function setColWidth(id,w){ state.colWidths[id]=w; }
@@ -14869,10 +14883,20 @@ window.tableau = __webpack_exports__;
   });
 
   document.getElementById('btnColumns').addEventListener('click', function(){
-    const html = '<div class="p-title">Show / hide columns</div>'+
-      state.valueColumns.map(c=>'<label><input type="checkbox" data-col="'+c.id+'" '+(c.visible?'checked':'')+'> '+escapeHtml(c.label)+(c.kind!=='measure'?' <span style="color:var(--ink-faint);font-size:10px;">('+c.kind+')</span>':'')+'</label>').join('');
+    const html = '<div class="p-title">Dimensions</div>'+
+      DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(state.groupBy.has(d)?'checked':'')+'> '+escapeHtml(DIM_META[d].label)+'</label>').join('')+
+      '<div class="p-title">Measures</div>'+
+      state.valueColumns.map(c=>'<label><input type="checkbox" data-role="colval" data-col="'+c.id+'" '+(c.visible?'checked':'')+'> '+escapeHtml(c.label)+(c.kind!=='measure'?' <span style="color:var(--ink-faint);font-size:10px;">('+c.kind+')</span>':'')+'</label>').join('');
     const div = openPopover(this, html);
-    div.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+    div.querySelectorAll('[data-role="coldim"]').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        const d = cb.getAttribute('data-dim');
+        if(cb.checked) state.groupBy.add(d); else state.groupBy.delete(d);
+        if(state.groupBy.size===0){ state.groupBy.add(d); cb.checked=true; }
+        render();
+      });
+    });
+    div.querySelectorAll('[data-role="colval"]').forEach(cb=>{
       cb.addEventListener('change', ()=>{ const col = state.valueColumns.find(c=>c.id===cb.getAttribute('data-col')); col.visible = cb.checked; render(); });
     });
   });
@@ -14979,41 +15003,65 @@ window.tableau = __webpack_exports__;
   }
 
   document.getElementById('btnFormula').addEventListener('click', openFormulaModal);
+
+  function fieldNameToId(name){
+    const norm = String(name).trim().toLowerCase();
+    const vc = state.valueColumns.find(c=>c.label.toLowerCase()===norm);
+    return vc ? vc.id : null;
+  }
+  // Converts a user-typed "[Cost] / [Impressions]" expression into the
+  // internal-id form our aggregation engine already evaluates against,
+  // so every other formula/pivot/chart code path stays unchanged.
+  function resolveBracketExpr(expr){
+    let error = null;
+    const resolved = expr.replace(/\[([^\]]+)\]/g, (whole, name)=>{
+      const id = fieldNameToId(name);
+      if(!id){ error = 'Unknown field: ['+name+']'; return whole; }
+      return id;
+    });
+    return {resolved, error};
+  }
+
   function openFormulaModal(){
     const layer = document.getElementById('modalLayer');
-    const tokens = DEFAULT_VALUE_COLUMNS.map(c=>c.id).concat(state.formulas.map(f=>f.id));
+    const names = state.valueColumns.map(c=>c.label);
     layer.innerHTML =
       '<div class="modal-backdrop" id="modalBackdrop"><div class="modal">'+
         '<h3>Add Formula</h3>'+
-        '<p class="hint">Temporary calculated column, computed on the current (aggregated) rows.</p>'+
+        '<p class="hint">Temporary calculated column, computed on the current (aggregated) rows. Reference fields exactly as they appear on the Marks card, in [brackets].</p>'+
         '<label>Formula Name</label><input type="text" id="formulaName" placeholder="e.g. Margin">'+
-        '<label>Expression</label><input type="text" id="formulaExpr" placeholder="e.g. '+(tokens[0]||'field1')+' / '+(tokens[1]||'field2')+'">'+
-        '<div class="tokens">'+tokens.map(t=>'<span class="tok" data-tok="'+t+'">'+t+'</span>').join('')+'</div>'+
+        '<label>Expression</label><input type="text" id="formulaExpr" placeholder="e.g. ['+(names[0]||'Field A')+'] / ['+(names[1]||'Field B')+']">'+
+        '<div class="tokens">'+names.map(n=>'<span class="tok" data-tok="'+escapeAttr(n)+'">'+escapeHtml(n)+'</span>').join('')+'</div>'+
         '<label>Format</label><select id="formulaFormat"><option value="decimalx">Decimal (2.00)</option><option value="currency">Currency ($)</option><option value="percent">Percent (%)</option><option value="number">Number</option></select>'+
+        (isAuthoring ? '<label class="dr-check" style="margin-top:10px;"><input type="checkbox" id="formulaIsDefault"> Make this a default calculated field for all viewers</label>' : '')+
         '<div class="err" id="formulaErr"></div>'+
         '<div class="actions"><button class="btn" id="formulaCancel">Cancel</button><button class="btn primary" id="formulaAdd">Add Column</button></div>'+
       '</div></div>';
     layer.querySelectorAll('.tok').forEach(tok=>{
-      tok.addEventListener('click', ()=>{ const input=document.getElementById('formulaExpr'); input.value=(input.value?input.value+' ':'')+tok.getAttribute('data-tok'); input.focus(); });
+      tok.addEventListener('click', ()=>{ const input=document.getElementById('formulaExpr'); input.value=(input.value?input.value+' ':'')+'['+tok.getAttribute('data-tok')+']'; input.focus(); });
     });
     document.getElementById('modalBackdrop').addEventListener('click', e=>{ if(e.target.id==='modalBackdrop') layer.innerHTML=''; });
     document.getElementById('formulaCancel').addEventListener('click', ()=> layer.innerHTML='');
     document.getElementById('formulaAdd').addEventListener('click', ()=>{
       const name = document.getElementById('formulaName').value.trim();
-      const expr = document.getElementById('formulaExpr').value.trim();
+      const exprRaw = document.getElementById('formulaExpr').value.trim();
       const format = document.getElementById('formulaFormat').value;
+      const asDefault = isAuthoring && document.getElementById('formulaIsDefault') && document.getElementById('formulaIsDefault').checked;
       const errEl = document.getElementById('formulaErr');
       if(!name){ errEl.textContent='Give the formula a name.'; return; }
-      if(!expr){ errEl.textContent='Enter an expression.'; return; }
-      if(!/^[a-zA-Z0-9_+\-*/().\s]+$/.test(expr)){ errEl.textContent='Only field names and + - * / ( ) are allowed.'; return; }
+      if(!exprRaw){ errEl.textContent='Enter an expression.'; return; }
+      if(!/^[a-zA-Z0-9_+\-*/().\s\[\]]+$/.test(exprRaw)){ errEl.textContent='Only field references in [brackets] and + - * / ( ) are allowed.'; return; }
+      const {resolved, error} = resolveBracketExpr(exprRaw);
+      if(error){ errEl.textContent = error; return; }
       const testScope = {}; DEFAULT_VALUE_COLUMNS.forEach(c=>testScope[c.id]=1);
-      const test = safeEval(expr, testScope);
-      if(test===null){ errEl.textContent='Could not evaluate this expression — check field names.'; return; }
+      const test = safeEval(resolved, testScope);
+      if(test===null){ errEl.textContent='Could not evaluate this expression — check field references.'; return; }
       const id = 'f_'+name.toLowerCase().replace(/[^a-z0-9]+/g,'_')+'_'+Date.now().toString(36);
-      state.formulas.push({id, label:name, expr, format});
-      state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format, visible:true});
+      state.formulas.push({id, label:name, expr:resolved, format, isEditorDefault:!!asDefault});
+      state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format, visible:true, isEditorDefault:!!asDefault});
       state.columnOrder.push(id);
       layer.innerHTML=''; render();
+      if(asDefault) saveDefaultsFromCurrentState();
     });
   }
 
@@ -15209,6 +15257,119 @@ window.tableau = __webpack_exports__;
     document.getElementById('errorMsg').textContent = message;
   }
 
+  function loadSavedDefaults(){
+    try{
+      const raw = tableau.extensions.settings.get('supertableDefaults');
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){ return null; }
+  }
+
+  function applySavedDefaults(saved){
+    if(!saved) return;
+    if(Array.isArray(saved.editorFormulas)){
+      saved.editorFormulas.forEach(f=>{
+        if(state.formulas.some(existing=>existing.id===f.id)) return;
+        state.formulas.push({id:f.id, label:f.label, expr:f.expr, format:f.format, isEditorDefault:true});
+        state.valueColumns.push({id:f.id, label:f.label, kind:'formula', agg:'CALC', format:f.format, visible:true, isEditorDefault:true});
+        if(!state.columnOrder.includes(f.id)) state.columnOrder.push(f.id);
+      });
+    }
+    if(Array.isArray(saved.hiddenValueIds)){
+      saved.hiddenValueIds.forEach(id=>{ const c=state.valueColumns.find(c=>c.id===id); if(c) c.visible=false; });
+    }
+    if(Array.isArray(saved.groupBy) && saved.groupBy.length){
+      const validGroup = saved.groupBy.filter(d=>DIM_ORDER.includes(d));
+      if(validGroup.length) state.groupBy = new Set(validGroup);
+    }
+    if(Array.isArray(saved.columnOrder)){
+      const validIds = new Set(state.columnOrder);
+      const filtered = saved.columnOrder.filter(id=>validIds.has(id));
+      const missing = state.columnOrder.filter(id=>!filtered.includes(id));
+      if(filtered.length) state.columnOrder = filtered.concat(missing);
+    }
+  }
+
+  function saveDefaultsFromCurrentState(){
+    const payload = {
+      columnOrder: state.columnOrder,
+      hiddenValueIds: state.valueColumns.filter(c=>!c.visible).map(c=>c.id),
+      groupBy: Array.from(state.groupBy),
+      editorFormulas: state.formulas.filter(f=>f.isEditorDefault).map(f=>({id:f.id, label:f.label, expr:f.expr, format:f.format}))
+    };
+    tableau.extensions.settings.set('supertableDefaults', JSON.stringify(payload));
+    tableau.extensions.settings.saveAsync().then(()=> showToast('Saved as default for all viewers'));
+  }
+  document.getElementById('btnSaveDefault').addEventListener('click', saveDefaultsFromCurrentState);
+
+  let tableauFiltersCache = [];
+  function refreshTableauFilters(){
+    if(!currentWorksheet || !currentWorksheet.getFiltersAsync) return Promise.resolve();
+    return currentWorksheet.getFiltersAsync().then(filters=>{
+      tableauFiltersCache = filters || [];
+      renderTableauFiltersBar();
+    }).catch(err=>{ console.warn('getFiltersAsync failed:', err); });
+  }
+  function fmtFilterVal(dv){ if(!dv) return '—'; return (dv.formattedValue!=null && dv.formattedValue!=='') ? dv.formattedValue : String(dv.value); }
+  function renderTableauFiltersBar(){
+    const el = document.getElementById('tableauFilters');
+    if(!tableauFiltersCache.length){ el.innerHTML=''; return; }
+    el.innerHTML = '<span class="tf-label">Filters</span>' + tableauFiltersCache.map((f,i)=>{
+      let summary = '';
+      if(f.filterType==='categorical') summary = f.isAllSelected ? 'All' : (f.appliedValues.length+' selected');
+      else if(f.filterType==='range') summary = fmtFilterVal(f.minValue)+' – '+fmtFilterVal(f.maxValue);
+      else if(f.filterType==='relativeDate') summary = 'relative date';
+      else summary = 'hierarchical';
+      return '<button class="tf-btn" data-idx="'+i+'">'+escapeHtml(stripWrapper(f.fieldName).bare)+': '+escapeHtml(summary)+'<span class="tf-caret">▾</span></button>';
+    }).join('');
+    el.querySelectorAll('.tf-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=> openTableauFilterPopover(btn, tableauFiltersCache[parseInt(btn.getAttribute('data-idx'),10)]));
+    });
+  }
+  function openTableauFilterPopover(anchor, filter){
+    if(filter.filterType==='categorical'){
+      filter.getDomainAsync(tableau.FilterDomainType.Relevant).then(domain=>{
+        const seen = {};
+        const options = domain.values.map(dv=>{ const key=String(dv.value); seen[key]=dv.value; return {key, label:fmtFilterVal(dv)}; });
+        filter.appliedValues.forEach(dv=>{ const key=String(dv.value); if(!(key in seen)){ seen[key]=dv.value; options.push({key, label:fmtFilterVal(dv)}); } });
+        const appliedKeys = new Set(filter.isAllSelected ? options.map(o=>o.key) : filter.appliedValues.map(dv=>String(dv.value)));
+        const html = '<div class="p-title">'+escapeHtml(stripWrapper(filter.fieldName).bare)+'</div>'+
+          '<div class="p-links"><span class="p-link" data-act="all">Select all</span><span class="p-link" data-act="none">Clear</span></div>'+
+          options.map(o=>'<label><input type="checkbox" data-val="'+escapeAttr(o.key)+'" '+(appliedKeys.has(o.key)?'checked':'')+'> '+escapeHtml(o.label)+'</label>').join('');
+        const div = openPopover(anchor, html);
+        function commit(){
+          const checkedKeys = Array.from(div.querySelectorAll('input[type=checkbox]:checked')).map(cb=>cb.getAttribute('data-val'));
+          const promise = checkedKeys.length===options.length
+            ? currentWorksheet.clearFilterAsync(filter.fieldName)
+            : currentWorksheet.applyFilterAsync(filter.fieldName, checkedKeys.map(k=>seen[k]), tableau.FilterUpdateType.Replace);
+          promise.then(refreshTableauFilters).catch(err=>{ console.warn('applyFilterAsync failed:', err); });
+        }
+        div.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.addEventListener('change', commit));
+        div.querySelector('[data-act="all"]').addEventListener('click', ()=>{ div.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=true); commit(); });
+        div.querySelector('[data-act="none"]').addEventListener('click', ()=>{ div.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=false); commit(); });
+      }).catch(err=>{ console.warn('getDomainAsync failed:', err); });
+    } else if(filter.filterType==='range'){
+      const minV = filter.minValue ? filter.minValue.value : '';
+      const maxV = filter.maxValue ? filter.maxValue.value : '';
+      const html = '<div class="p-title">'+escapeHtml(stripWrapper(filter.fieldName).bare)+'</div>'+
+        '<div style="padding:2px 8px 6px;display:flex;gap:6px;">'+
+        '<input type="number" id="rfMin" style="width:80px;" value="'+escapeAttr(minV)+'" placeholder="min">'+
+        '<input type="number" id="rfMax" style="width:80px;" value="'+escapeAttr(maxV)+'" placeholder="max">'+
+        '</div>'+
+        '<div class="p-item" data-act="apply" style="justify-content:center;background:var(--ink);color:#fff;border-radius:6px;margin:2px 8px;">Apply</div>';
+      const div = openPopover(anchor, html);
+      div.querySelector('[data-act="apply"]').addEventListener('click', ()=>{
+        const minEl = div.querySelector('#rfMin'), maxEl = div.querySelector('#rfMax');
+        const opts = {};
+        if(minEl.value!=='') opts.min = parseFloat(minEl.value);
+        if(maxEl.value!=='') opts.max = parseFloat(maxEl.value);
+        currentWorksheet.applyRangeFilterAsync(filter.fieldName, opts).then(refreshTableauFilters).catch(err=>{ console.warn('applyRangeFilterAsync failed:', err); });
+        closePopover();
+      });
+    } else {
+      openPopover(anchor, '<div class="p-title">'+escapeHtml(stripWrapper(filter.fieldName).bare)+'</div><div style="padding:8px;font-size:11.5px;color:var(--ink-soft);max-width:220px;">This filter type isn\'t editable here yet — change it in Tableau\'s Filters shelf.</div>');
+    }
+  }
+
   async function boot(){
     document.getElementById('errorScreen').classList.add('hidden');
     document.getElementById('appRoot').classList.add('hidden');
@@ -15220,6 +15381,9 @@ window.tableau = __webpack_exports__;
       currentWorksheet = tableau.extensions.worksheetContent.worksheet;
       if(!currentWorksheet){ showError('Could not access the worksheet this extension is attached to.'); return; }
 
+      isAuthoring = !!(tableau.extensions.environment && tableau.extensions.environment.mode === tableau.ExtensionMode.Authoring);
+      document.getElementById('btnSaveDefault').classList.toggle('hidden', !isAuthoring);
+
       const dataTable = await fetchWorksheetData(currentWorksheet);
       const schemaInfo = buildSchemaAndRows(dataTable);
       DATA_BOUNDS.min = schemaInfo.dataMinIso;
@@ -15227,18 +15391,22 @@ window.tableau = __webpack_exports__;
 
       state = defaultState();
       if(schemaInfo.dateRangeDefault) state.dateRange = schemaInfo.dateRangeDefault;
+      applySavedDefaults(loadSavedDefaults());
 
       document.getElementById('worksheetLabel').textContent = currentWorksheet.name ? ('Worksheet: '+currentWorksheet.name) : '';
       document.getElementById('loadingScreen').classList.add('hidden');
       document.getElementById('appRoot').classList.remove('hidden');
 
-      // Re-fetch when the underlying view changes
-      // Not every event type is supported for a viz extension's worksheet — register each
-      // defensively so one unsupported type doesn't take down the whole boot sequence.
+      refreshTableauFilters();
+
+      // Re-fetch when the underlying view changes. FilterChanged and SummaryDataChanged
+      // are the event types actually supported on a viz extension's worksheet;
+      // ParameterChanged is only valid on Parameter objects, not Worksheet, so it's
+      // deliberately not registered here (registering it throws unsupported-event-name).
       try{ currentWorksheet.addEventListener(tableau.TableauEventType.FilterChanged, refreshData); }
       catch(e){ console.warn('FilterChanged listener not supported here:', e); }
-      try{ currentWorksheet.addEventListener(tableau.TableauEventType.ParameterChanged, refreshData); }
-      catch(e){ console.warn('ParameterChanged listener not supported here:', e); }
+      try{ currentWorksheet.addEventListener(tableau.TableauEventType.SummaryDataChanged, refreshData); }
+      catch(e){ console.warn('SummaryDataChanged listener not supported here:', e); }
 
       render();
     }catch(err){
@@ -15260,10 +15428,10 @@ window.tableau = __webpack_exports__;
       refreshQueued = false;
       try{
         const dataTable = await fetchWorksheetData(currentWorksheet);
-        const prevGroupBy = state ? state.groupBy : null;
         const schemaInfo = buildSchemaAndRows(dataTable);
         DATA_BOUNDS.min = schemaInfo.dataMinIso;
         DATA_BOUNDS.max = schemaInfo.dataMaxIso;
+        refreshTableauFilters();
         // Keep the user's current configuration; just refresh the underlying rows.
         render();
       }catch(err){ console.error('Refresh failed:', err); }
