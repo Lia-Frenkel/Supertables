@@ -14373,7 +14373,7 @@ window.tableau = __webpack_exports__;
       sort: {colId:null, dir:0},
       formulas: [],
       selected: new Set(),
-      pivot: {active:false, rowDims:[DIM_ORDER[0]||'__period'], colDims: DIM_ORDER[1] ? [DIM_ORDER[1]] : [], valueId: DEFAULT_VALUE_COLUMNS[0] ? DEFAULT_VALUE_COLUMNS[0].id : null},
+      pivot: {active:false, rowDims:[DIM_ORDER[0]||'__period'], colDims: DIM_ORDER[1] ? [DIM_ORDER[1]] : [], valueIds: DEFAULT_VALUE_COLUMNS[0] ? [DEFAULT_VALUE_COLUMNS[0].id] : [], valuesLocation:'columns'},
       dateRange: DATE_FIELD_ID ? {timeframe:'weekly', start:DATA_BOUNDS.min, end:DATA_BOUNDS.max, hideIncomplete:false} : null
     };
   }
@@ -14564,7 +14564,7 @@ window.tableau = __webpack_exports__;
   function updateModeUI(){
     const active = state.pivot.active;
     document.getElementById('btnExitPivot').classList.toggle('hidden', !active);
-    ['btnColumns','btnFormula','btnCopy','btnExport','btnChart'].forEach(id=>{ document.getElementById(id).disabled = active; });
+    ['btnColumns','btnCopy','btnExport','btnChart'].forEach(id=>{ document.getElementById(id).disabled = active; });
   }
 
   function renderDateRangeBar(){
@@ -14965,7 +14965,10 @@ window.tableau = __webpack_exports__;
     setTimeout(()=>{ layer.innerHTML=''; }, 2200);
   }
 
-  document.getElementById('btnFormula').addEventListener('click', ()=> openFormulaModal());
+  document.getElementById('btnFormula').addEventListener('click', ()=> {
+    try{ openFormulaModal(); }
+    catch(err){ console.error('Formula modal failed to open:', err); showToast('Formula error: '+(err&&err.message?err.message:err)); }
+  });
 
   function fieldNameToId(name){
     const norm = String(name).trim().toLowerCase();
@@ -14985,7 +14988,7 @@ window.tableau = __webpack_exports__;
     return {resolved, error};
   }
 
-  const FORMAT_LABEL = {number:'Number', currency:'Currency', percent:'Percent', decimalx:'Decimal'};
+  const FORMAT_LABEL = {number:'Number', currency:'Currency', percent:'Percent'};
   const DEFAULT_DECIMALS = {number:0, currency:2, percent:1, decimalx:2};
   function formatFormulaValue(v, format, decimals){
     if(v==null) return '—';
@@ -15012,7 +15015,7 @@ window.tableau = __webpack_exports__;
     const names = state.valueColumns.map(c=>c.label);
     const prefillName = existing ? existing.label : '';
     const prefillExpr = existing ? idsToBracketExpr(existing.expr) : '';
-    const prefillFormat = existing ? existing.format : 'decimalx';
+    const prefillFormat = existing ? existing.format : 'number';
     const prefillDecimals = existing && existing.decimals!=null ? existing.decimals : DEFAULT_DECIMALS[prefillFormat];
     layer.innerHTML =
       '<div class="modal-backdrop" id="modalBackdrop"><div class="modal">'+
@@ -15164,37 +15167,52 @@ window.tableau = __webpack_exports__;
 
   function openPivotConfig(anchor){
     const p = state.pivot;
-    function zoneOf(d){ if(p.rowDims.includes(d)) return 'rows'; if(p.colDims.includes(d)) return 'cols'; return 'off'; }
-    const ZONE_LABEL = {off:'—', rows:'Rows', cols:'Columns'};
     const html =
-      '<div class="p-title">Dimensions — assign to Rows or Columns</div>'+
-      DIM_ORDER.map(d=>{
-        const z = zoneOf(d);
-        return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;">'+
-          '<span style="font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">'+escapeHtml(DIM_META[d].label)+'</span>'+
-          '<select data-pivot-dim="'+d+'" style="font-size:12px;padding:3px 5px;border:1px solid var(--line);border-radius:6px;">'+
-            Object.keys(ZONE_LABEL).map(z2=>'<option value="'+z2+'" '+(z2===z?'selected':'')+'>'+ZONE_LABEL[z2]+'</option>').join('')+
-          '</select>'+
-        '</div>';
-      }).join('')+
-      '<div class="p-title">Values (aggregated per cell)</div>'+
-      '<select id="pvValue">'+state.valueColumns.map(c=>'<option value="'+c.id+'" '+(c.id===p.valueId?'selected':'')+'>'+escapeHtml(c.label)+'</option>').join('')+'</select>'+
+      '<div class="p-title">Row Grouping</div>'+
+      DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="rowdim" data-dim="'+d+'" '+(p.rowDims.includes(d)?'checked':'')+'> '+escapeHtml(DIM_META[d].label)+'</label>').join('')+
+      '<div class="p-title">Column Grouping</div>'+
+      DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(p.colDims.includes(d)?'checked':'')+'> '+escapeHtml(DIM_META[d].label)+'</label>').join('')+
+      '<div class="p-title">Selected Values</div>'+
+      state.valueColumns.map(c=>'<label><input type="checkbox" data-role="pivotval" data-val="'+c.id+'" '+(p.valueIds.includes(c.id)?'checked':'')+'> '+escapeHtml(c.label)+'</label>').join('')+
+      '<div class="p-title">Values Location</div>'+
+      '<div style="display:flex;gap:6px;padding:2px 8px 6px;">'+
+        ['columns','rows'].map(loc=>'<button type="button" class="p-item" data-role="valloc" data-loc="'+loc+'" style="flex:1;justify-content:center;'+(p.valuesLocation===loc?'background:var(--accent-soft);color:var(--accent-ink);':'')+'">'+(loc==='columns'?'Columns':'Rows')+'</button>').join('')+
+      '</div>'+
       '<div class="p-item" data-act="apply" style="justify-content:center;background:var(--ink);color:#fff;border-radius:6px;margin-top:4px;">Apply Pivot</div>'+
       (p.active ? '<div class="p-item danger" data-act="exit" style="justify-content:center;">Exit Pivot View</div>' : '');
     const div = openPopover(anchor, html);
-    div.querySelectorAll('[data-pivot-dim]').forEach(sel=>{
-      sel.addEventListener('change', ()=>{
-        const d = sel.getAttribute('data-pivot-dim');
+    div.querySelectorAll('[data-role="rowdim"]').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        const d = cb.getAttribute('data-dim');
         p.rowDims = p.rowDims.filter(x=>x!==d);
         p.colDims = p.colDims.filter(x=>x!==d);
-        if(sel.value==='rows') p.rowDims.push(d);
-        else if(sel.value==='cols') p.colDims.push(d);
+        if(cb.checked) p.rowDims.push(d);
+        openPivotConfig(anchor);
       });
     });
-    const valSel = div.querySelector('#pvValue'); if(valSel) valSel.addEventListener('change', e=>{ p.valueId = e.target.value; });
+    div.querySelectorAll('[data-role="coldim"]').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        const d = cb.getAttribute('data-dim');
+        p.colDims = p.colDims.filter(x=>x!==d);
+        p.rowDims = p.rowDims.filter(x=>x!==d);
+        if(cb.checked) p.colDims.push(d);
+        openPivotConfig(anchor);
+      });
+    });
+    div.querySelectorAll('[data-role="pivotval"]').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        const v = cb.getAttribute('data-val');
+        p.valueIds = p.valueIds.filter(x=>x!==v);
+        if(cb.checked) p.valueIds.push(v);
+      });
+    });
+    div.querySelectorAll('[data-role="valloc"]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{ p.valuesLocation = btn.getAttribute('data-loc'); openPivotConfig(anchor); });
+    });
     const applyBtn = div.querySelector('[data-act="apply"]');
     if(applyBtn) applyBtn.addEventListener('click', ()=>{
-      if(p.rowDims.length===0){ window.alert('Assign at least one dimension to Rows.'); return; }
+      if(p.rowDims.length===0){ window.alert('Choose at least one Row Grouping dimension.'); return; }
+      if(p.valueIds.length===0){ window.alert('Choose at least one value in Selected Values.'); return; }
       p.active=true; closePopover(); render();
     });
     const exitBtn = div.querySelector('[data-act="exit"]'); if(exitBtn) exitBtn.addEventListener('click', ()=>{ p.active=false; closePopover(); render(); });
@@ -15209,9 +15227,7 @@ window.tableau = __webpack_exports__;
   }
   function renderPivotCell(valueId, v){ return getFormatterFor(valueId)(v); }
 
-  function renderPivotView(){
-    const {rowDims, colDims, valueId} = state.pivot;
-    const filteredRaw = RAW.filter(passesRawRow);
+  function pivotAggregate(filteredRaw, rowDims, colDims){
     const cellMap = new Map(), rowTotalMap = new Map(), colTotalMap = new Map(), rowMetaMap = new Map(), colMetaMap = new Map();
     const grand = zeroSums();
     for(const r of filteredRaw){
@@ -15229,39 +15245,114 @@ window.tableau = __webpack_exports__;
     }
     const colKeys = Array.from(colMetaMap.keys()).sort((a,b)=>String(a).localeCompare(String(b)));
     const rowKeys = Array.from(rowMetaMap.keys()).sort((a,b)=>a.localeCompare(b));
-    function colHeaderLabel(cKey){
-      if(!colDims.length) return labelForValue(valueId);
+    return {cellMap, rowTotalMap, colTotalMap, rowMetaMap, colMetaMap, grand, colKeys, rowKeys};
+  }
+
+  function renderPivotView(){
+    const {rowDims, colDims, valueIds, valuesLocation} = state.pivot;
+    const filteredRaw = RAW.filter(passesRawRow);
+    const agg = pivotAggregate(filteredRaw, rowDims, colDims);
+    const {cellMap, rowTotalMap, colTotalMap, rowMetaMap, colMetaMap, grand, colKeys, rowKeys} = agg;
+    function colGroupLabel(cKey){
+      if(!colDims.length) return '';
       return colMetaMap.get(cKey).map((v,i)=>fieldLabelForKey(colDims[i],v)).join(' \u00B7 ');
     }
-
-    document.getElementById('colgroup').innerHTML =
-      rowDims.map(d=>'<col style="width:'+getWidth(d)+'px">').join('') + colKeys.map(()=>'<col style="width:112px">').join('') + '<col style="width:112px">';
-    document.getElementById('headerRow').innerHTML =
-      rowDims.map(d=>'<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(DIM_META[d].label)+'</span></div></div></th>').join('')+
-      colKeys.map(k=>'<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(colHeaderLabel(k))+'</span></div></div></th>').join('')+
-      '<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">Total</span></div></div></th>';
     document.getElementById('filterRow').innerHTML = '';
 
+    if(valuesLocation==='rows'){ renderPivotRowsMode(rowDims, colDims, valueIds, agg); return; }
+
+    // ---- Values as columns: each column-group gets one sub-column per selected value ----
+    const dataColCount = colKeys.length * valueIds.length;
+    document.getElementById('colgroup').innerHTML =
+      rowDims.map(d=>'<col style="width:'+getWidth(d)+'px">').join('') +
+      colKeys.map(()=>valueIds.map(()=>'<col style="width:105px">').join('')).join('') +
+      valueIds.map(()=>'<col style="width:105px">').join('');
+    const groupRow =
+      rowDims.map(d=>'<th rowspan="2"><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(DIM_META[d].label)+'</span></div></div></th>').join('')+
+      colKeys.map(cKey=>'<th colspan="'+valueIds.length+'"><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(colGroupLabel(cKey)||'\u2014')+'</span></div></div></th>').join('')+
+      '<th colspan="'+valueIds.length+'"><div class="th-inner"><div class="th-label-wrap"><span class="th-label">Total</span></div></div></th>';
+    document.getElementById('headerRow').innerHTML = groupRow;
+    const metricRow =
+      colKeys.map(()=>valueIds.map(vid=>'<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(labelForValue(vid))+'</span></div></div></th>').join('')).join('')+
+      valueIds.map(vid=>'<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(labelForValue(vid))+'</span></div></div></th>').join('');
+    document.getElementById('filterRow').innerHTML = metricRow;
+
     const tbody = document.getElementById('tbody'), tfoot = document.getElementById('tfoot');
-    const totalCols = rowDims.length + colKeys.length + 1;
+    tfoot.innerHTML = '';
+    const totalCols = rowDims.length + dataColCount + valueIds.length;
     if(rowKeys.length===0){
       tbody.innerHTML = '<tr><td colspan="'+totalCols+'"><div class="empty-state"><b>No results match your filters</b></div></td></tr>';
-      tfoot.innerHTML = '';
     } else {
-      tbody.innerHTML = rowKeys.map(rKey=>{
+      const grandCells = colKeys.map(cKey=>valueIds.map(vid=>'<td class="num">'+renderPivotCell(vid, valueFromSums(colTotalMap.get(cKey), vid))+'</td>').join('')).join('')+
+        valueIds.map(vid=>'<td class="num" style="background:#EEF0FA;font-weight:600;color:#4A3DD6;">'+renderPivotCell(vid, valueFromSums(grand, vid))+'</td>').join('');
+      const totalRow = '<tr style="background:#EEF0FA;">'+rowDims.map((d,i)=>'<td class="dimcell" style="color:#4A3DD6;">'+(i===0?'Total':'')+'</td>').join('')+grandCells+'</tr>';
+      const dataRows = rowKeys.map(rKey=>{
         const parts = rowMetaMap.get(rKey);
-        const cells = colKeys.map(cKey=>'<td class="num">'+renderPivotCell(valueId, valueFromSums(cellMap.get(rKey+'\u241E'+cKey), valueId))+'</td>').join('');
-        return '<tr>'+parts.map((v,i)=>'<td class="dimcell">'+escapeHtml(fieldLabelForKey(rowDims[i],v))+'</td>').join('')+cells+
-          '<td class="num" style="background:#EEF0FA;font-weight:600;color:#4A3DD6;">'+renderPivotCell(valueId,valueFromSums(rowTotalMap.get(rKey), valueId))+'</td></tr>';
+        const cells = colKeys.map(cKey=>valueIds.map(vid=>'<td class="num">'+renderPivotCell(vid, valueFromSums(cellMap.get(rKey+'\u241E'+cKey), vid))+'</td>').join('')).join('');
+        const totals = valueIds.map(vid=>'<td class="num" style="background:#F5F7F6;font-weight:600;">'+renderPivotCell(vid, valueFromSums(rowTotalMap.get(rKey), vid))+'</td>').join('');
+        return '<tr>'+parts.map((v,i)=>'<td class="dimcell">'+escapeHtml(fieldLabelForKey(rowDims[i],v))+'</td>').join('')+cells+totals+'</tr>';
       }).join('');
-      const grandCells = colKeys.map(cKey=>'<td class="num">'+renderPivotCell(valueId, valueFromSums(colTotalMap.get(cKey), valueId))+'</td>').join('');
-      tfoot.innerHTML = '<tr><td class="dimcell" colspan="'+rowDims.length+'">TOTAL</td>'+grandCells+
-        '<td class="num">'+renderPivotCell(valueId, valueFromSums(grand, valueId))+'</td></tr>';
+      tbody.innerHTML = totalRow + dataRows;
     }
-    document.getElementById('pipeline').innerHTML =
-      step('source', RAW.length+' rows')+'<span class="arrow">\u2192</span>'+
-      step('view', 'pivot \u00B7 rows: '+rowDims.map(d=>DIM_META[d].label).join(', ')+' \u00B7 cols: '+(colDims.length?colDims.map(d=>DIM_META[d].label).join(', '):'(none)')+' \u00B7 \u03A3 '+labelForValue(valueId));
+    document.getElementById('pipeline').innerHTML = pivotPipelineStep(rowDims, colDims, valueIds);
     document.getElementById('selCount').textContent = '';
+  }
+
+  // ---- Values as rows: each row-group expands into one sub-row per selected value ----
+  function renderPivotRowsMode(rowDims, colDims, valueIds, agg){
+    const {cellMap, rowTotalMap, colTotalMap, grand, colKeys, rowKeys, rowMetaMap, colMetaMap} = agg;
+    function colLabel(cKey){ if(!colDims.length) return 'Value'; return colMetaMap.get(cKey).map((v,i)=>fieldLabelForKey(colDims[i],v)).join(' \u00B7 '); }
+
+    document.getElementById('colgroup').innerHTML =
+      rowDims.map(d=>'<col style="width:'+getWidth(d)+'px">').join('') + '<col style="width:120px">' +
+      colKeys.map(()=>'<col style="width:112px">').join('') + '<col style="width:112px">';
+    document.getElementById('headerRow').innerHTML =
+      rowDims.map(d=>'<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(DIM_META[d].label)+'</span></div></div></th>').join('')+
+      '<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">Metric</span></div></div></th>'+
+      colKeys.map(cKey=>'<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(colLabel(cKey))+'</span></div></div></th>').join('')+
+      '<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">Total</span></div></div></th>';
+
+    const tbody = document.getElementById('tbody'), tfoot = document.getElementById('tfoot');
+    tfoot.innerHTML = '';
+    const totalCols = rowDims.length + 1 + colKeys.length + 1;
+    if(rowKeys.length===0){
+      tbody.innerHTML = '<tr><td colspan="'+totalCols+'"><div class="empty-state"><b>No results match your filters</b></div></td></tr>';
+      document.getElementById('pipeline').innerHTML = pivotPipelineStep(rowDims, colDims, valueIds);
+      document.getElementById('selCount').textContent = '';
+      return;
+    }
+
+    function metricSubRows(groupLabelHtml, sumsForCol, sumsTotal){
+      return valueIds.map((vid,i)=>{
+        const lead = i===0 ? groupLabelHtml : '';
+        const cells = colKeys.map(cKey=>'<td class="num">'+renderPivotCell(vid, valueFromSums(sumsForCol(cKey), vid))+'</td>').join('');
+        return '<tr>'+lead+'<td class="dimcell" style="color:var(--ink-soft);">'+escapeHtml(labelForValue(vid))+'</td>'+cells+
+          '<td class="num" style="background:#F5F7F6;font-weight:600;">'+renderPivotCell(vid, valueFromSums(sumsTotal, vid))+'</td></tr>';
+      }).join('');
+    }
+
+    const totalLeadCell = '<td class="dimcell" colspan="'+rowDims.length+'" rowspan="'+valueIds.length+'" style="background:#EEF0FA;color:#4A3DD6;font-weight:600;">Total</td>';
+    const totalRows = valueIds.map((vid,i)=>{
+      const lead = i===0 ? totalLeadCell : '';
+      const cells = colKeys.map(cKey=>'<td class="num" style="background:#EEF0FA;">'+renderPivotCell(vid, valueFromSums(colTotalMap.get(cKey), vid))+'</td>').join('');
+      return '<tr style="background:#EEF0FA;">'+lead+'<td class="dimcell" style="color:#4A3DD6;">'+escapeHtml(labelForValue(vid))+'</td>'+cells+
+        '<td class="num" style="background:#EEF0FA;font-weight:600;color:#4A3DD6;">'+renderPivotCell(vid, valueFromSums(grand, vid))+'</td></tr>';
+    }).join('');
+
+    const dataRows = rowKeys.map(rKey=>{
+      const parts = rowMetaMap.get(rKey);
+      const leadCells = parts.map((v,i)=>'<td class="dimcell" rowspan="'+valueIds.length+'">'+escapeHtml(fieldLabelForKey(rowDims[i],v))+'</td>').join('');
+      return metricSubRows(leadCells, cKey=>cellMap.get(rKey+'\u241E'+cKey), rowTotalMap.get(rKey));
+    }).join('');
+
+    tbody.innerHTML = totalRows + dataRows;
+    document.getElementById('pipeline').innerHTML = pivotPipelineStep(rowDims, colDims, valueIds);
+    document.getElementById('selCount').textContent = '';
+  }
+
+  function pivotPipelineStep(rowDims, colDims, valueIds){
+    return step('source', RAW.length+' rows')+'<span class="arrow">\u2192</span>'+
+      step('view', 'pivot \u00B7 rows: '+rowDims.map(d=>DIM_META[d].label).join(', ')+' \u00B7 cols: '+(colDims.length?colDims.map(d=>DIM_META[d].label).join(', '):'(none)')+' \u00B7 \u03A3 '+valueIds.map(v=>labelForValue(v)).join(', '));
   }
 
   /* ============================================================
@@ -15603,7 +15694,7 @@ window.tableau = __webpack_exports__;
     const fieldRows = initial.fields || [];
     const rows = (initial.formulas || []).map(f=>({name:f.name||'', expr:f.expr||'', format:f.format||'decimalx'}));
     const root = document.getElementById('cfgDialogRoot');
-    const FORMAT_LABEL = {decimalx:'Decimal', currency:'Currency', percent:'Percent', number:'Number'};
+    const FORMAT_LABEL = {currency:'Currency', percent:'Percent', number:'Number'};
 
     function fieldRowHtml(f,i){
       const opts = roleOptionsFor(f.dataType);
