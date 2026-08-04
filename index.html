@@ -82,7 +82,7 @@
   .th-inner{position:relative;padding:8px 9px 7px 9px;display:flex;align-items:flex-start;gap:6px;background:#FAFAFC;user-select:none;min-height:34px;}
   .th-label-wrap{flex:1;min-width:0;cursor:pointer;display:flex;align-items:flex-start;gap:5px;}
   .th-grip{color:var(--grip);font-size:11px;flex:none;cursor:grab;line-height:1.3;}
-  .th-label{font-weight:600;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-faint);white-space:normal;overflow-wrap:anywhere;line-height:1.28;}
+  .th-label{font-weight:600;font-size:12px;letter-spacing:.01em;color:var(--ink-faint);white-space:normal;overflow-wrap:anywhere;line-height:1.28;}
   .th-agg{font-size:9px;font-weight:600;color:var(--accent-ink);background:var(--accent-soft);border-radius:999px;padding:1px 6px;flex:none;}
   .th-sort{font-size:10px;color:var(--accent);flex:none;}
   .th-menu-btn{flex:none;border:none;background:none;cursor:pointer;color:var(--ink-faint);padding:2px 4px;border-radius:4px;font-size:12px;line-height:1;}
@@ -170,13 +170,11 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input type="text" id="searchInput" placeholder="Search table…">
       </div>
-      <button class="btn" id="btnGroupBy">Group By <span class="count" id="groupByCount">0</span></button>
       <button class="btn" id="btnColumns">Columns</button>
       <button class="btn" id="btnPivot">Pivot View</button>
       <button class="btn warnish hidden" id="btnExitPivot">✕ Exit Pivot</button>
       <button class="btn" id="btnFormula">ƒ Formula</button>
       <div class="divider"></div>
-      <button class="btn" id="btnClearFilters">Clear Filters</button>
       <button class="btn" id="btnReset">Reset</button>
       <div class="spacer"></div>
       <span class="sel-count" id="selCount"></span>
@@ -185,7 +183,6 @@
       <button class="btn accentish" id="btnExport">Export CSV ⭳</button>
     </div>
     <div class="topfilters" id="tableauFilters"></div>
-    <div class="topfilters" id="topfilters"></div>
     <div class="pipeline" id="pipeline"></div>
   </div>
 
@@ -14547,7 +14544,6 @@ window.tableau = __webpack_exports__;
   function render(){
     if(DATE_FIELD_ID) DIM_META['__period'].label = periodDimLabel(state.dateRange.timeframe);
     renderDateRangeBar();
-    renderTopFilters();
 
     if(state.pivot.active){ updateModeUI(); renderPivotView(); return; }
     updateModeUI();
@@ -14562,13 +14558,12 @@ window.tableau = __webpack_exports__;
     renderBody(cols, rows);
     renderFooter(cols, total, rows.length);
     renderToolbarState(rows.length);
-    document.getElementById('groupByCount').textContent = groupByArr.length;
   }
 
   function updateModeUI(){
     const active = state.pivot.active;
     document.getElementById('btnExitPivot').classList.toggle('hidden', !active);
-    ['btnGroupBy','btnColumns','btnFormula','btnCopy','btnExport','btnChart'].forEach(id=>{ document.getElementById(id).disabled = active; });
+    ['btnColumns','btnFormula','btnCopy','btnExport','btnChart'].forEach(id=>{ document.getElementById(id).disabled = active; });
   }
 
   function renderDateRangeBar(){
@@ -14607,49 +14602,19 @@ window.tableau = __webpack_exports__;
     document.getElementById('hideIncompleteChk').addEventListener('change', e=>{ state.dateRange.hideIncomplete = e.target.checked; render(); });
   }
 
-  function renderTopFilters(){
-    const el = document.getElementById('topfilters');
-    if(TOPFILTER_DIMS.length===0){ el.innerHTML=''; return; }
-    el.innerHTML = '<span class="tf-label">Top Filters</span>' + TOPFILTER_DIMS.map(d=>{
-      const all = distinctValuesFor(d);
-      const sel = state.topFilters[d];
-      const countLabel = sel ? sel.size+' of '+all.length : 'All';
-      return '<button class="tf-btn'+(sel?' tf-active':'')+'" data-dim="'+d+'">'+DIM_META[d].label+': '+countLabel+'<span class="tf-caret">▾</span></button>';
-    }).join('');
-    el.querySelectorAll('.tf-btn').forEach(btn=>{ btn.addEventListener('click', ()=> openTopFilterPopover(btn, btn.getAttribute('data-dim'))); });
-  }
-
-  function openTopFilterPopover(anchor, dim){
-    const all = distinctValuesFor(dim);
-    const selectedSet = state.topFilters[dim] || new Set(all);
-    const html = '<div class="p-title">'+escapeHtml(DIM_META[dim].label)+'</div>'+
-      '<div class="p-links"><span class="p-link" data-act="all">Select all</span><span class="p-link" data-act="none">Clear</span></div>'+
-      all.map(v=>'<label><input type="checkbox" data-val="'+escapeAttr(v)+'" '+(selectedSet.has(v)?'checked':'')+'> '+escapeHtml(v)+'</label>').join('');
-    const div = openPopover(anchor, html);
-    function commit(){
-      const checked = Array.from(div.querySelectorAll('input[type=checkbox]:checked')).map(cb=>cb.getAttribute('data-val'));
-      if(checked.length === all.length) delete state.topFilters[dim];
-      else state.topFilters[dim] = new Set(checked);
-      render();
-    }
-    div.querySelectorAll('input[type=checkbox]').forEach(cb=> cb.addEventListener('change', commit));
-    div.querySelector('[data-act="all"]').addEventListener('click', ()=>{ div.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=true); commit(); });
-    div.querySelector('[data-act="none"]').addEventListener('click', ()=>{ div.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=false); commit(); });
-  }
-
   function renderPipelineStrip(groupByArr){
     const el = document.getElementById('pipeline');
     const filterCount = Object.values(state.filters).filter(f=>f && ((f.text) || (f.op && f.val!==''&&f.val!==undefined))).length
                        + Object.keys(state.keepOnly).length
                        + Object.values(state.excludeMap).reduce((n,s)=>n+s.size,0);
-    const narrowedDims = TOPFILTER_DIMS.filter(d=>state.topFilters[d]);
+    const activeTableauFilters = tableauFiltersCache.filter(f=> f.filterType!=='categorical' || !f.isAllSelected).length;
     const steps = [];
     if(DATE_FIELD_ID && state.dateRange){
       const dr = state.dateRange;
       const tfLabel = (TIMEFRAME_OPTIONS.find(o=>o.id===dr.timeframe)||{}).label || dr.timeframe;
       steps.push(step('window', shortLabel(parseIsoDate(dr.start))+' \u2013 '+shortLabel(parseIsoDate(dr.end))+' \u00B7 '+tfLabel+(dr.hideIncomplete?' \u00B7 complete only':'')));
     }
-    steps.push(step('scope', narrowedDims.length ? narrowedDims.map(d=>DIM_META[d].label).join(', ')+' narrowed' : 'all data', narrowedDims.length===0));
+    steps.push(step('filters shelf', activeTableauFilters ? activeTableauFilters+' active' : 'none', activeTableauFilters===0));
     steps.push(step('group', groupByArr.length ? groupByArr.map(d=>DIM_META[d].label).join(' \u203A ') : 'none', groupByArr.length===0));
     steps.push(step('filter', filterCount ? filterCount+' active' : 'none', filterCount===0));
     steps.push(step('sort', state.sort.colId ? (labelFor(state.sort.colId)+' '+(state.sort.dir>0?'\u2191':'\u2193')) : 'none', !state.sort.colId));
@@ -14877,22 +14842,8 @@ window.tableau = __webpack_exports__;
   document.addEventListener('click', e=>{
     const layer = document.getElementById('popoverLayer');
     if(layer.contains(e.target)) return;
-    if(e.target.closest && (e.target.closest('#btnGroupBy')||e.target.closest('#btnColumns')||e.target.closest('#btnPivot')||e.target.closest('[data-role="menu"]')||e.target.closest('.tf-btn'))) return;
+    if(e.target.closest && (e.target.closest('#btnColumns')||e.target.closest('#btnPivot')||e.target.closest('[data-role="menu"]')||e.target.closest('.tf-btn'))) return;
     closePopover();
-  });
-
-  document.getElementById('btnGroupBy').addEventListener('click', function(){
-    const html = '<div class="p-title">Group rows by</div>'+
-      DIM_ORDER.map(d=>'<label><input type="checkbox" data-dim="'+d+'" '+(state.groupBy.has(d)?'checked':'')+'> '+DIM_META[d].label+'</label>').join('');
-    const div = openPopover(this, html);
-    div.querySelectorAll('input[type=checkbox]').forEach(cb=>{
-      cb.addEventListener('change', ()=>{
-        const d = cb.getAttribute('data-dim');
-        if(cb.checked) state.groupBy.add(d); else state.groupBy.delete(d);
-        if(state.groupBy.size===0){ state.groupBy.add(d); cb.checked=true; }
-        render();
-      });
-    });
   });
 
   document.getElementById('btnColumns').addEventListener('click', function(){
@@ -14969,10 +14920,6 @@ window.tableau = __webpack_exports__;
      10. TOOLBAR
   ============================================================ */
   document.getElementById('searchInput').addEventListener('input', e=>{ state.search = e.target.value; renderBodyOnly(); });
-  document.getElementById('btnClearFilters').addEventListener('click', ()=>{
-    state.filters = {}; state.keepOnly = {}; state.excludeMap = {}; state.topFilters = {}; state.search = '';
-    document.getElementById('searchInput').value=''; render();
-  });
   document.getElementById('btnReset').addEventListener('click', ()=>{
     state = defaultState(); document.getElementById('searchInput').value=''; render();
   });
@@ -15361,7 +15308,6 @@ window.tableau = __webpack_exports__;
       filter.getDomainAsync(tableau.FilterDomainType.Relevant).then(domain=>{
         const seen = {};
         const options = domain.values.map(dv=>{ const key=String(dv.value); seen[key]=dv.value; return {key, label:fmtFilterVal(dv)}; });
-        filter.appliedValues.forEach(dv=>{ const key=String(dv.value); if(!(key in seen)){ seen[key]=dv.value; options.push({key, label:fmtFilterVal(dv)}); } });
         const appliedKeys = new Set(filter.isAllSelected ? options.map(o=>o.key) : filter.appliedValues.map(dv=>String(dv.value)));
         const html = '<div class="p-title">'+escapeHtml(stripWrapper(filter.fieldName).bare)+'</div>'+
           '<div class="p-links"><span class="p-link" data-act="all">Select all</span><span class="p-link" data-act="none">Clear</span></div>'+
