@@ -65,6 +65,8 @@
   .tf-btn:hover{border-color:var(--line-strong);}
   .tf-btn.tf-active{background:var(--accent-soft);border-color:var(--accent-soft-strong);color:var(--accent-ink);}
   .tf-caret{font-size:9px;opacity:.7;margin-left:2px;}
+  .tf-reset{margin-left:auto;font-size:11.5px;font-weight:600;color:var(--accent-ink);background:none;border:none;cursor:pointer;text-decoration:underline;padding:4px 2px;}
+  .tf-reset:hover{color:var(--accent);}
 
   .pipeline{background:var(--pivot-head);color:var(--ink-soft);font-size:11px;padding:8px 12px;display:flex;align-items:center;flex-wrap:wrap;border-radius:0 0 var(--radius) var(--radius);overflow-x:auto;border-top:1px solid var(--line);}
   .pipeline .step{display:flex;align-items:center;gap:6px;white-space:nowrap;padding:2px 0;}
@@ -128,7 +130,7 @@
   .popover hr{border:none;border-top:1px solid var(--line);margin:5px 2px;}
   .hidden{display:none !important;}
 
-  .modal-backdrop{position:fixed;inset:0;background:rgba(31,33,82,.35);display:flex;align-items:center;justify-content:center;z-index:200;}
+  .modal-backdrop{position:fixed;inset:0;background:rgba(31,33,82,.35);display:flex;align-items:flex-start;justify-content:center;padding-top:70px;overflow:auto;z-index:200;}
   .modal{background:#fff;border-radius:16px;width:360px;padding:18px;box-shadow:0 20px 50px rgba(31,33,82,.22);}
   .modal h3{margin:0 0 3px;font-size:14px;font-weight:600;}
   .modal p.hint{margin:0 0 12px;font-size:11.5px;color:var(--ink-soft);}
@@ -175,7 +177,6 @@
       <button class="btn warnish hidden" id="btnExitPivot">✕ Exit Pivot</button>
       <button class="btn" id="btnFormula">ƒ Formula</button>
       <div class="divider"></div>
-      <button class="btn" id="btnReset">Reset</button>
       <div class="spacer"></div>
       <span class="sel-count" id="selCount"></span>
       <button class="btn" id="btnChart">📊 Create Chart</button>
@@ -14372,7 +14373,7 @@ window.tableau = __webpack_exports__;
       sort: {colId:null, dir:0},
       formulas: [],
       selected: new Set(),
-      pivot: {active:false, rowDims:[DIM_ORDER[0]||'__period'], colDim: DIM_ORDER[1]||DIM_ORDER[0]||'__period', valueId: DEFAULT_VALUE_COLUMNS[0] ? DEFAULT_VALUE_COLUMNS[0].id : null},
+      pivot: {active:false, rowDims:[DIM_ORDER[0]||'__period'], colDims: DIM_ORDER[1] ? [DIM_ORDER[1]] : [], valueId: DEFAULT_VALUE_COLUMNS[0] ? DEFAULT_VALUE_COLUMNS[0].id : null},
       dateRange: DATE_FIELD_ID ? {timeframe:'weekly', start:DATA_BOUNDS.min, end:DATA_BOUNDS.max, hideIncomplete:false} : null
     };
   }
@@ -14673,8 +14674,7 @@ window.tableau = __webpack_exports__;
   }
 
   function renderValueCell(c, v){
-    const fmt = FORMATTERS[c.format] || FORMATTERS.plain;
-    return fmt(v);
+    return getFormatterFor(c.id)(v);
   }
   function dimCellText(c, r){ return c.id==='__period' ? r.periodLabel : r[c.id]; }
 
@@ -14873,7 +14873,7 @@ window.tableau = __webpack_exports__;
     items.push(item('autosize','Auto Size Column'));
     if(!isDim){
       const col = state.valueColumns.find(c=>c.id===colId);
-      if(col && col.kind==='formula') items.push('<hr>', item('deleteFormula','Remove Formula','danger'));
+      if(col && col.kind==='formula') items.push('<hr>', item('editFormula','Edit Formula'), item('deleteFormula','Remove Formula','danger'));
     }
     const div = openPopover(anchor, items.join(''));
     div.querySelectorAll('.p-item').forEach(el=>{
@@ -14883,6 +14883,12 @@ window.tableau = __webpack_exports__;
         if(action==='sortDesc') state.sort={colId,dir:-1};
         if(action==='hide'){ const c=state.valueColumns.find(c=>c.id===colId); if(c) c.visible=false; }
         if(action==='autosize') resetColWidth(colId);
+        if(action==='editFormula'){
+          const f = state.formulas.find(f=>f.id===colId);
+          closePopover();
+          if(f) openFormulaModal(f);
+          return;
+        }
         if(action==='deleteFormula'){
           state.formulas = state.formulas.filter(f=>f.id!==colId);
           state.valueColumns = state.valueColumns.filter(c=>c.id!==colId);
@@ -14920,9 +14926,6 @@ window.tableau = __webpack_exports__;
      10. TOOLBAR
   ============================================================ */
   document.getElementById('searchInput').addEventListener('input', e=>{ state.search = e.target.value; renderBodyOnly(); });
-  document.getElementById('btnReset').addEventListener('click', ()=>{
-    state = defaultState(); document.getElementById('searchInput').value=''; render();
-  });
 
   document.getElementById('btnCopy').addEventListener('click', ()=>{
     if(state.pivot.active) return;
@@ -14932,7 +14935,7 @@ window.tableau = __webpack_exports__;
     const header = cols.map(c=>c.label).join('\t');
     const body = targetRows.map(r=>cols.map(c=>{
       if(c.type==='dim') return dimCellText(c,r);
-      const fmt = FORMATTERS[c.format]||FORMATTERS.plain;
+      const fmt = getFormatterFor(c.id);
       return fmt(r[c.id]).replace(/^\$/,'').replace(/,/g,'');
     }).join('\t')).join('\n');
     if(navigator.clipboard){
@@ -14982,22 +14985,58 @@ window.tableau = __webpack_exports__;
     return {resolved, error};
   }
 
-  function openFormulaModal(){
+  const FORMAT_LABEL = {number:'Number', currency:'Currency', percent:'Percent', decimalx:'Decimal'};
+  const DEFAULT_DECIMALS = {number:0, currency:2, percent:1, decimalx:2};
+  function formatFormulaValue(v, format, decimals){
+    if(v==null) return '—';
+    const d = (decimals==null) ? (DEFAULT_DECIMALS[format]!=null ? DEFAULT_DECIMALS[format] : 2) : decimals;
+    if(format==='currency') return '$'+v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+    if(format==='percent') return (v*100).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+'%';
+    if(format==='decimalx') return v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+'x';
+    return v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+  }
+  // Single place every value cell / pivot cell / chart tooltip / CSV export goes through, so
+  // formula columns respect their own format+decimals while native measures keep using the
+  // format auto-inferred from Tableau's own formatted values.
+  function getFormatterFor(colId){
+    const vc = state.valueColumns.find(c=>c.id===colId);
+    if(vc && vc.kind==='formula'){
+      return v => formatFormulaValue(v, vc.format, vc.decimals);
+    }
+    const fmtKey = vc ? vc.format : 'number';
+    return FORMATTERS[fmtKey] || FORMATTERS.plain;
+  }
+
+  function openFormulaModal(existing){
     const layer = document.getElementById('modalLayer');
     const names = state.valueColumns.map(c=>c.label);
+    const prefillName = existing ? existing.label : '';
+    const prefillExpr = existing ? idsToBracketExpr(existing.expr) : '';
+    const prefillFormat = existing ? existing.format : 'decimalx';
+    const prefillDecimals = existing && existing.decimals!=null ? existing.decimals : DEFAULT_DECIMALS[prefillFormat];
     layer.innerHTML =
       '<div class="modal-backdrop" id="modalBackdrop"><div class="modal">'+
-        '<h3>Add Formula</h3>'+
+        '<h3>'+(existing?'Edit Formula':'Add Formula')+'</h3>'+
         '<p class="hint">Temporary calculated column, computed on the current (aggregated) rows. Reference fields exactly as they appear on the Marks card, in [brackets].</p>'+
-        '<label>Formula Name</label><input type="text" id="formulaName" placeholder="e.g. Margin">'+
-        '<label>Expression</label><input type="text" id="formulaExpr" placeholder="e.g. ['+(names[0]||'Field A')+'] / ['+(names[1]||'Field B')+']">'+
+        '<label>Formula Name</label><input type="text" id="formulaName" placeholder="e.g. Margin" value="'+escapeAttr(prefillName)+'">'+
+        '<label>Expression</label><input type="text" id="formulaExpr" placeholder="e.g. ['+(names[0]||'Field A')+'] / ['+(names[1]||'Field B')+']" value="'+escapeAttr(prefillExpr)+'">'+
         '<div class="tokens">'+names.map(n=>'<span class="tok" data-tok="'+escapeAttr(n)+'">'+escapeHtml(n)+'</span>').join('')+'</div>'+
-        '<label>Format</label><select id="formulaFormat"><option value="decimalx">Decimal (2.00)</option><option value="currency">Currency ($)</option><option value="percent">Percent (%)</option><option value="number">Number</option></select>'+
+        '<div style="display:flex;gap:8px;">'+
+          '<div style="flex:1;"><label>Format</label><select id="formulaFormat">'+
+            Object.keys(FORMAT_LABEL).map(f=>'<option value="'+f+'" '+(f===prefillFormat?'selected':'')+'>'+FORMAT_LABEL[f]+'</option>').join('')+
+          '</select></div>'+
+          '<div style="flex:1;"><label>Decimal places</label><select id="formulaDecimals">'+
+            [0,1,2,3,4].map(n=>'<option value="'+n+'" '+(n===prefillDecimals?'selected':'')+'>'+n+'</option>').join('')+
+          '</select></div>'+
+        '</div>'+
         '<div class="err" id="formulaErr"></div>'+
-        '<div class="actions"><button class="btn" id="formulaCancel">Cancel</button><button class="btn primary" id="formulaAdd">Add Column</button></div>'+
+        '<div class="actions"><button class="btn" id="formulaCancel">Cancel</button><button class="btn primary" id="formulaAdd">'+(existing?'Save Changes':'Add Column')+'</button></div>'+
       '</div></div>';
     layer.querySelectorAll('.tok').forEach(tok=>{
       tok.addEventListener('click', ()=>{ const input=document.getElementById('formulaExpr'); input.value=(input.value?input.value+' ':'')+'['+tok.getAttribute('data-tok')+']'; input.focus(); });
+    });
+    document.getElementById('formulaFormat').addEventListener('change', e=>{
+      document.getElementById('formulaDecimals').value = DEFAULT_DECIMALS[e.target.value];
     });
     document.getElementById('modalBackdrop').addEventListener('click', e=>{ if(e.target.id==='modalBackdrop') layer.innerHTML=''; });
     document.getElementById('formulaCancel').addEventListener('click', ()=> layer.innerHTML='');
@@ -15005,6 +15044,7 @@ window.tableau = __webpack_exports__;
       const name = document.getElementById('formulaName').value.trim();
       const exprRaw = document.getElementById('formulaExpr').value.trim();
       const format = document.getElementById('formulaFormat').value;
+      const decimals = parseInt(document.getElementById('formulaDecimals').value, 10);
       const errEl = document.getElementById('formulaErr');
       if(!name){ errEl.textContent='Give the formula a name.'; return; }
       if(!exprRaw){ errEl.textContent='Enter an expression.'; return; }
@@ -15014,12 +15054,17 @@ window.tableau = __webpack_exports__;
       const testScope = {}; DEFAULT_VALUE_COLUMNS.forEach(c=>testScope[c.id]=1);
       const test = safeEval(resolved, testScope);
       if(test===null){ errEl.textContent='Could not evaluate this expression — check field references.'; return; }
-      const id = 'f_'+name.toLowerCase().replace(/[^a-z0-9]+/g,'_')+'_'+Date.now().toString(36);
-      state.formulas.push({id, label:name, expr:resolved, format});
-      state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format, visible:true});
-      state.columnOrder.push(id);
+      if(existing){
+        existing.label = name; existing.expr = resolved; existing.format = format; existing.decimals = decimals;
+        const vc = state.valueColumns.find(c=>c.id===existing.id);
+        if(vc){ vc.label = name; vc.format = format; vc.decimals = decimals; }
+      } else {
+        const id = 'f_'+name.toLowerCase().replace(/[^a-z0-9]+/g,'_')+'_'+Date.now().toString(36);
+        state.formulas.push({id, label:name, expr:resolved, format, decimals});
+        state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format, decimals, visible:true});
+        state.columnOrder.push(id);
+      }
       layer.innerHTML=''; render();
-      if(asDefault) saveDefaultsFromCurrentState();
     });
   }
 
@@ -15095,7 +15140,7 @@ window.tableau = __webpack_exports__;
         return;
       }
       const {labels, values} = aggregateForChart(srcRows, cfg.dim, cfg.measure);
-      const fmt = FORMATTERS[formatFor(cfg.measure)] || FORMATTERS.plain;
+      const fmt = getFormatterFor(cfg.measure);
       const dataset = { label: labelForValue(cfg.measure), data: values,
         backgroundColor: cfg.type==='pie' ? labels.map((_,i)=>palette[i%palette.length]) : palette[0],
         borderColor: cfg.type==='line' ? palette[0] : undefined, fill: cfg.type==='line' ? false : undefined };
@@ -15119,28 +15164,39 @@ window.tableau = __webpack_exports__;
 
   function openPivotConfig(anchor){
     const p = state.pivot;
+    function zoneOf(d){ if(p.rowDims.includes(d)) return 'rows'; if(p.colDims.includes(d)) return 'cols'; return 'off'; }
+    const ZONE_LABEL = {off:'—', rows:'Rows', cols:'Columns'};
     const html =
-      '<div class="p-title">Rows</div>'+
-      DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="rowdim" data-dim="'+d+'" '+(p.rowDims.includes(d)?'checked':'')+' '+(d===p.colDim?'disabled':'')+'> '+DIM_META[d].label+'</label>').join('')+
-      '<div class="p-title">Columns</div>'+
-      '<select id="pvColDim">'+DIM_ORDER.filter(d=>!p.rowDims.includes(d)).map(d=>'<option value="'+d+'" '+(d===p.colDim?'selected':'')+'>'+DIM_META[d].label+'</option>').join('')+'</select>'+
+      '<div class="p-title">Dimensions — assign to Rows or Columns</div>'+
+      DIM_ORDER.map(d=>{
+        const z = zoneOf(d);
+        return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;">'+
+          '<span style="font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">'+escapeHtml(DIM_META[d].label)+'</span>'+
+          '<select data-pivot-dim="'+d+'" style="font-size:12px;padding:3px 5px;border:1px solid var(--line);border-radius:6px;">'+
+            Object.keys(ZONE_LABEL).map(z2=>'<option value="'+z2+'" '+(z2===z?'selected':'')+'>'+ZONE_LABEL[z2]+'</option>').join('')+
+          '</select>'+
+        '</div>';
+      }).join('')+
       '<div class="p-title">Values (aggregated per cell)</div>'+
       '<select id="pvValue">'+state.valueColumns.map(c=>'<option value="'+c.id+'" '+(c.id===p.valueId?'selected':'')+'>'+escapeHtml(c.label)+'</option>').join('')+'</select>'+
       '<div class="p-item" data-act="apply" style="justify-content:center;background:var(--ink);color:#fff;border-radius:6px;margin-top:4px;">Apply Pivot</div>'+
       (p.active ? '<div class="p-item danger" data-act="exit" style="justify-content:center;">Exit Pivot View</div>' : '');
     const div = openPopover(anchor, html);
-    div.querySelectorAll('[data-role="rowdim"]').forEach(cb=>{
-      cb.addEventListener('change', ()=>{
-        const d = cb.getAttribute('data-dim');
-        if(cb.checked){ if(!p.rowDims.includes(d)) p.rowDims.push(d); }
-        else { p.rowDims = p.rowDims.filter(x=>x!==d); if(p.rowDims.length===0) p.rowDims=[d]; }
-        if(p.colDim && p.rowDims.includes(p.colDim)) p.colDim = DIM_ORDER.find(x=>!p.rowDims.includes(x)) || p.colDim;
-        openPivotConfig(anchor);
+    div.querySelectorAll('[data-pivot-dim]').forEach(sel=>{
+      sel.addEventListener('change', ()=>{
+        const d = sel.getAttribute('data-pivot-dim');
+        p.rowDims = p.rowDims.filter(x=>x!==d);
+        p.colDims = p.colDims.filter(x=>x!==d);
+        if(sel.value==='rows') p.rowDims.push(d);
+        else if(sel.value==='cols') p.colDims.push(d);
       });
     });
-    const colSel = div.querySelector('#pvColDim'); if(colSel) colSel.addEventListener('change', e=>{ p.colDim = e.target.value; });
     const valSel = div.querySelector('#pvValue'); if(valSel) valSel.addEventListener('change', e=>{ p.valueId = e.target.value; });
-    const applyBtn = div.querySelector('[data-act="apply"]'); if(applyBtn) applyBtn.addEventListener('click', ()=>{ p.active=true; closePopover(); render(); });
+    const applyBtn = div.querySelector('[data-act="apply"]');
+    if(applyBtn) applyBtn.addEventListener('click', ()=>{
+      if(p.rowDims.length===0){ window.alert('Assign at least one dimension to Rows.'); return; }
+      p.active=true; closePopover(); render();
+    });
     const exitBtn = div.querySelector('[data-act="exit"]'); if(exitBtn) exitBtn.addEventListener('click', ()=>{ p.active=false; closePopover(); render(); });
   }
 
@@ -15151,33 +15207,38 @@ window.tableau = __webpack_exports__;
     if(f){ const scope={}; DEFAULT_VALUE_COLUMNS.forEach(c=>scope[c.id]=sums[c.id]); return safeEval(f.expr, scope); }
     return null;
   }
-  function renderPivotCell(valueId, v){ const fmt = FORMATTERS[formatFor(valueId)] || FORMATTERS.plain; return fmt(v); }
+  function renderPivotCell(valueId, v){ return getFormatterFor(valueId)(v); }
 
   function renderPivotView(){
-    const {rowDims, colDim, valueId} = state.pivot;
+    const {rowDims, colDims, valueId} = state.pivot;
     const filteredRaw = RAW.filter(passesRawRow);
-    const cellMap = new Map(), rowTotalMap = new Map(), colTotalMap = new Map(), rowMetaMap = new Map(), colKeySet = new Set();
+    const cellMap = new Map(), rowTotalMap = new Map(), colTotalMap = new Map(), rowMetaMap = new Map(), colMetaMap = new Map();
     const grand = zeroSums();
     for(const r of filteredRaw){
       const rParts = rowDims.map(d=>dimGroupValue(r,d));
       const rKey = rParts.join('\u241F');
-      const cKey = dimGroupValue(r, colDim);
+      const cParts = colDims.map(d=>dimGroupValue(r,d));
+      const cKey = colDims.length ? cParts.join('\u241F') : '__all__';
       if(!rowMetaMap.has(rKey)) rowMetaMap.set(rKey, rParts);
-      colKeySet.add(cKey);
+      if(!colMetaMap.has(cKey)) colMetaMap.set(cKey, cParts);
       const cellKey = rKey+'\u241E'+cKey;
       let cellSums = cellMap.get(cellKey); if(!cellSums){ cellSums=zeroSums(); cellMap.set(cellKey,cellSums); } addSums(cellSums,r);
       let rSums = rowTotalMap.get(rKey); if(!rSums){ rSums=zeroSums(); rowTotalMap.set(rKey,rSums); } addSums(rSums,r);
       let cSums = colTotalMap.get(cKey); if(!cSums){ cSums=zeroSums(); colTotalMap.set(cKey,cSums); } addSums(cSums,r);
       addSums(grand, r);
     }
-    const colKeys = Array.from(colKeySet).sort((a,b)=>String(a).localeCompare(String(b)));
+    const colKeys = Array.from(colMetaMap.keys()).sort((a,b)=>String(a).localeCompare(String(b)));
     const rowKeys = Array.from(rowMetaMap.keys()).sort((a,b)=>a.localeCompare(b));
+    function colHeaderLabel(cKey){
+      if(!colDims.length) return labelForValue(valueId);
+      return colMetaMap.get(cKey).map((v,i)=>fieldLabelForKey(colDims[i],v)).join(' \u00B7 ');
+    }
 
     document.getElementById('colgroup').innerHTML =
       rowDims.map(d=>'<col style="width:'+getWidth(d)+'px">').join('') + colKeys.map(()=>'<col style="width:112px">').join('') + '<col style="width:112px">';
     document.getElementById('headerRow').innerHTML =
       rowDims.map(d=>'<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(DIM_META[d].label)+'</span></div></div></th>').join('')+
-      colKeys.map(k=>'<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(fieldLabelForKey(colDim,k))+'</span></div></div></th>').join('')+
+      colKeys.map(k=>'<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">'+escapeHtml(colHeaderLabel(k))+'</span></div></div></th>').join('')+
       '<th><div class="th-inner"><div class="th-label-wrap"><span class="th-label">Total</span></div></div></th>';
     document.getElementById('filterRow').innerHTML = '';
 
@@ -15199,7 +15260,7 @@ window.tableau = __webpack_exports__;
     }
     document.getElementById('pipeline').innerHTML =
       step('source', RAW.length+' rows')+'<span class="arrow">\u2192</span>'+
-      step('view', 'pivot \u00B7 rows: '+rowDims.map(d=>DIM_META[d].label).join(', ')+' \u00B7 cols: '+DIM_META[colDim].label+' \u00B7 \u03A3 '+labelForValue(valueId));
+      step('view', 'pivot \u00B7 rows: '+rowDims.map(d=>DIM_META[d].label).join(', ')+' \u00B7 cols: '+(colDims.length?colDims.map(d=>DIM_META[d].label).join(', '):'(none)')+' \u00B7 \u03A3 '+labelForValue(valueId));
     document.getElementById('selCount').textContent = '';
   }
 
@@ -15290,8 +15351,7 @@ window.tableau = __webpack_exports__;
   function fmtFilterVal(dv){ if(!dv) return '—'; return (dv.formattedValue!=null && dv.formattedValue!=='') ? dv.formattedValue : String(dv.value); }
   function renderTableauFiltersBar(){
     const el = document.getElementById('tableauFilters');
-    if(!tableauFiltersCache.length){ el.innerHTML=''; return; }
-    el.innerHTML = '<span class="tf-label">Filters</span>' + tableauFiltersCache.map((f,i)=>{
+    const pills = tableauFiltersCache.map((f,i)=>{
       let summary = '';
       if(f.filterType==='categorical') summary = f.isAllSelected ? 'All' : (f.appliedValues.length+' selected');
       else if(f.filterType==='range') summary = fmtFilterVal(f.minValue)+' – '+fmtFilterVal(f.maxValue);
@@ -15299,10 +15359,26 @@ window.tableau = __webpack_exports__;
       else summary = 'hierarchical';
       return '<button class="tf-btn" data-idx="'+i+'">'+escapeHtml(stripWrapper(f.fieldName).bare)+': '+escapeHtml(summary)+'<span class="tf-caret">▾</span></button>';
     }).join('');
+    el.innerHTML = '<span class="tf-label">Filters</span>' + pills +
+      '<button class="tf-reset" id="btnResetAllFilters">Reset All Filters</button>';
     el.querySelectorAll('.tf-btn').forEach(btn=>{
       btn.addEventListener('click', ()=> openTableauFilterPopover(btn, tableauFiltersCache[parseInt(btn.getAttribute('data-idx'),10)]));
     });
+    document.getElementById('btnResetAllFilters').addEventListener('click', resetAllFilters);
   }
+
+  // Scoped deliberately to filtering state only — never touches formulas, column order/
+  // visibility, grouping, sort, or the Timeframe panel. Clears our own inline filters/keep-only/
+  // exclude/search AND every real filter on the worksheet's Filters shelf.
+  function resetAllFilters(){
+    state.filters = {}; state.keepOnly = {}; state.excludeMap = {}; state.search = '';
+    document.getElementById('searchInput').value = '';
+    const clears = tableauFiltersCache.map(f=> currentWorksheet.clearFilterAsync(f.fieldName).catch(err=>{
+      console.warn('clearFilterAsync failed for', f.fieldName, err);
+    }));
+    Promise.all(clears).then(()=>{ refreshTableauFilters().then(render); });
+  }
+
   function openTableauFilterPopover(anchor, filter){
     if(filter.filterType==='categorical'){
       filter.getDomainAsync(tableau.FilterDomainType.Relevant).then(domain=>{
