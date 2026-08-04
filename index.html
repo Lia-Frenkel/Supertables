@@ -14831,6 +14831,7 @@ window.tableau = __webpack_exports__;
     const layer = document.getElementById('popoverLayer');
     const div = document.createElement('div');
     div.className = 'popover'; div.innerHTML = html; layer.appendChild(div);
+    div.addEventListener('click', e=> e.stopPropagation());
     const rect = anchor.getBoundingClientRect();
     const top = Math.min(rect.bottom+6, window.innerHeight-Math.min(div.offsetHeight,400)-10);
     let left = rect.left;
@@ -15168,10 +15169,16 @@ window.tableau = __webpack_exports__;
   function openPivotConfig(anchor){
     const p = state.pivot;
     const html =
-      '<div class="p-title">Row Grouping</div>'+
-      DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="rowdim" data-dim="'+d+'" '+(p.rowDims.includes(d)?'checked':'')+'> '+escapeHtml(DIM_META[d].label)+'</label>').join('')+
-      '<div class="p-title">Column Grouping</div>'+
-      DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(p.colDims.includes(d)?'checked':'')+'> '+escapeHtml(DIM_META[d].label)+'</label>').join('')+
+      '<div style="display:flex;gap:4px;">'+
+        '<div style="flex:1;min-width:0;">'+
+          '<div class="p-title">Row Grouping</div>'+
+          DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="rowdim" data-dim="'+d+'" '+(p.rowDims.includes(d)?'checked':'')+'> '+escapeHtml(DIM_META[d].label)+'</label>').join('')+
+        '</div>'+
+        '<div style="flex:1;min-width:0;">'+
+          '<div class="p-title">Column Grouping</div>'+
+          DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(p.colDims.includes(d)?'checked':'')+'> '+escapeHtml(DIM_META[d].label)+'</label>').join('')+
+        '</div>'+
+      '</div>'+
       '<div class="p-title">Selected Values</div>'+
       state.valueColumns.map(c=>'<label><input type="checkbox" data-role="pivotval" data-val="'+c.id+'" '+(p.valueIds.includes(c.id)?'checked':'')+'> '+escapeHtml(c.label)+'</label>').join('')+
       '<div class="p-title">Values Location</div>'+
@@ -15181,6 +15188,8 @@ window.tableau = __webpack_exports__;
       '<div class="p-item" data-act="apply" style="justify-content:center;background:var(--ink);color:#fff;border-radius:6px;margin-top:4px;">Apply Pivot</div>'+
       (p.active ? '<div class="p-item danger" data-act="exit" style="justify-content:center;">Exit Pivot View</div>' : '');
     const div = openPopover(anchor, html);
+    div.style.maxWidth = '380px';
+    div.style.maxHeight = '80vh';
     div.querySelectorAll('[data-role="rowdim"]').forEach(cb=>{
       cb.addEventListener('change', ()=>{
         const d = cb.getAttribute('data-dim');
