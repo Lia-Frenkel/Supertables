@@ -14965,7 +14965,7 @@ window.tableau = __webpack_exports__;
     setTimeout(()=>{ layer.innerHTML=''; }, 2200);
   }
 
-  document.getElementById('btnFormula').addEventListener('click', openFormulaModal);
+  document.getElementById('btnFormula').addEventListener('click', ()=> openFormulaModal());
 
   function fieldNameToId(name){
     const norm = String(name).trim().toLowerCase();
