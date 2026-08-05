@@ -14157,41 +14157,96 @@ window.tableau = __webpack_exports__;
   function isoDate(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
   function parseIsoDate(s){ const p=s.split('-').map(Number); return new Date(p[0],p[1]-1,p[2]); }
   function addDays(d,n){ const r=new Date(d); r.setDate(r.getDate()+n); return r; }
-  function startOfWeek(d){ const r=new Date(d); const day=(r.getDay()+6)%7; r.setDate(r.getDate()-day); r.setHours(0,0,0,0); return r; }
+  function addMonths(d,n){ const r=new Date(d); r.setMonth(r.getMonth()+n); return r; }
+  function startOfMonth(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
+  function startOfQuarter(d){ const q=Math.floor(d.getMonth()/3); return new Date(d.getFullYear(), q*3, 1); }
+  function startOfYearFn(d){ return new Date(d.getFullYear(), 0, 1); }
+  // Week-start is configurable (Sun/Mon) via state.dateRange.weekStart; falls back to Monday
+  // before state exists yet (during the very first schema build in boot()).
+  function startOfWeek(d){
+    const ws = (state && state.dateRange && state.dateRange.weekStart) || 'mon';
+    const dow = d.getDay(); // 0=Sun..6=Sat
+    const offset = ws==='sun' ? dow : (dow+6)%7;
+    const r = new Date(d); r.setDate(r.getDate()-offset); r.setHours(0,0,0,0);
+    return r;
+  }
   function shortLabel(d){ return MONTH_ABBR[d.getMonth()]+' '+d.getDate(); }
-  function timeframeGranularity(tf){ return tf.indexOf('trailing')===0 ? 'daily' : tf; }
+  function fmtMDY(d){ return pad2(d.getMonth()+1)+'/'+pad2(d.getDate())+'/'+d.getFullYear(); }
+  function trailingN(tf){ return parseInt(tf.replace('trailing',''),10); }
+
+  // Buckets a date into a trailing-N-day period *anchored to real today*, exactly matching:
+  //   IF (TODAY()-[date]) <= N THEN "Last N Days"
+  //   ELSEIF ABS(FLOOR(DATEDIFF("day",TODAY(),[date])/N)+1) < 10 THEN "0"+... +" Periods Ago"
+  //   ELSE ... +" Periods Ago"
+  // Returns the bucket index (0 = the current/most-recent period).
+  function trailingPeriodIndex(date, n){
+    const todayMid = new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate());
+    const dateMid = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const daysAgo = Math.round((todayMid-dateMid)/86400000); // TODAY()-[date]
+    if(daysAgo<=n) return 0;
+    const dateDiff = Math.round((dateMid-todayMid)/86400000); // DATEDIFF("day",TODAY(),[date])
+    return Math.abs(Math.floor(dateDiff/n)+1);
+  }
 
   function periodKeyFor(date, timeframe){
-    const gran = timeframeGranularity(timeframe);
-    if(gran==='daily') return isoDate(date);
-    if(gran==='weekly') return isoDate(startOfWeek(date));
-    if(gran==='monthly') return date.getFullYear()+'-'+pad2(date.getMonth()+1);
-    if(gran==='quarterly') return date.getFullYear()+'-Q'+(Math.floor(date.getMonth()/3)+1);
-    if(gran==='yearly') return String(date.getFullYear());
+    if(timeframe.indexOf('trailing')===0) return 'p'+trailingPeriodIndex(date, trailingN(timeframe));
+    if(timeframe==='daily') return isoDate(date);
+    if(timeframe==='weekly') return isoDate(startOfWeek(date));
+    if(timeframe==='monthly') return date.getFullYear()+'-'+pad2(date.getMonth()+1);
+    if(timeframe==='quarterly') return date.getFullYear()+'-Q'+(Math.floor(date.getMonth()/3)+1);
+    if(timeframe==='yearly') return String(date.getFullYear());
     return isoDate(date);
   }
   function periodLabel(key, timeframe){
-    const gran = timeframeGranularity(timeframe);
-    if(gran==='daily') return shortLabel(parseIsoDate(key));
-    if(gran==='weekly') return 'Wk of '+shortLabel(parseIsoDate(key));
-    if(gran==='monthly'){ const p=key.split('-'); return MONTH_ABBR[Number(p[1])-1]+' '+p[0]; }
-    if(gran==='quarterly'){ const p=key.split('-'); return p[1]+' '+p[0]; }
+    if(timeframe.indexOf('trailing')===0){
+      const n = trailingN(timeframe);
+      const idx = parseInt(key.slice(1),10);
+      if(idx===0) return 'Last '+n+' Days';
+      return (idx<10?'0'+idx:String(idx))+' Periods Ago';
+    }
+    if(timeframe==='daily') return fmtMDY(parseIsoDate(key));
+    if(timeframe==='weekly') return fmtMDY(parseIsoDate(key));
+    if(timeframe==='monthly'){ const p=key.split('-'); return fmtMDY(new Date(Number(p[0]), Number(p[1])-1, 1)); }
+    if(timeframe==='quarterly'){ const p=key.split('-'); const q=Number(p[1].replace('Q','')); return fmtMDY(new Date(Number(p[0]), (q-1)*3, 1)); }
+    if(timeframe==='yearly') return fmtMDY(new Date(Number(key),0,1));
     return key;
   }
   function periodEndDate(key, timeframe){
-    const gran = timeframeGranularity(timeframe);
-    if(gran==='daily') return parseIsoDate(key);
-    if(gran==='weekly') return addDays(parseIsoDate(key),6);
-    if(gran==='monthly'){ const p=key.split('-').map(Number); return new Date(p[0],p[1],0); }
-    if(gran==='quarterly'){ const p=key.split('-'); const q=Number(p[1].replace('Q','')); return new Date(Number(p[0]), q*3, 0); }
-    if(gran==='yearly') return new Date(Number(key),11,31);
+    // Trailing periods are rolling windows relative to today, not fixed calendar periods —
+    // they're never "incomplete" in the Hide-incomplete-period sense.
+    if(timeframe.indexOf('trailing')===0) return new Date(TODAY);
+    if(timeframe==='daily') return parseIsoDate(key);
+    if(timeframe==='weekly') return addDays(parseIsoDate(key),6);
+    if(timeframe==='monthly'){ const p=key.split('-').map(Number); return new Date(p[0],p[1],0); }
+    if(timeframe==='quarterly'){ const p=key.split('-'); const q=Number(p[1].replace('Q','')); return new Date(Number(p[0]), q*3, 0); }
+    if(timeframe==='yearly') return new Date(Number(key),11,31);
     return parseIsoDate(key);
   }
   function isPeriodComplete(key, timeframe, today){ return periodEndDate(key,timeframe) <= today; }
   function periodDimLabel(timeframe){
-    const gran = timeframeGranularity(timeframe);
-    return {daily:'Day',weekly:'Week',monthly:'Month',quarterly:'Quarter',yearly:'Year'}[gran] || 'Period';
+    if(timeframe.indexOf('trailing')===0) return 'Period';
+    return {daily:'Day',weekly:'Week',monthly:'Month',quarterly:'Quarter',yearly:'Year'}[timeframe] || 'Period';
   }
+
+  // Default/reset date-range math: for any timeframe, show the last 14 available periods
+  // ending at `endIso`, clamped to however much history actually exists in the data.
+  function computeStartForPeriodsBack(timeframe, endIso, periodsBack){
+    const end = parseIsoDate(endIso);
+    if(timeframe.indexOf('trailing')===0){
+      const n = trailingN(timeframe);
+      return isoDate(addDays(end, -(n*periodsBack-1)));
+    }
+    if(timeframe==='daily') return isoDate(addDays(end, -(periodsBack-1)));
+    if(timeframe==='weekly'){ const wkStart=startOfWeek(end); return isoDate(addDays(wkStart, -(periodsBack-1)*7)); }
+    if(timeframe==='monthly'){ const mStart=startOfMonth(end); return isoDate(addMonths(mStart, -(periodsBack-1))); }
+    if(timeframe==='quarterly'){ const qStart=startOfQuarter(end); return isoDate(addMonths(qStart, -(periodsBack-1)*3)); }
+    if(timeframe==='yearly'){ const yStart=startOfYearFn(end); return isoDate(new Date(yStart.getFullYear()-(periodsBack-1), 0, 1)); }
+    return isoDate(addDays(end, -(periodsBack-1)));
+  }
+  function clampStartToData(startIso){
+    return (DATA_BOUNDS.min && startIso < DATA_BOUNDS.min) ? DATA_BOUNDS.min : startIso;
+  }
+
   const TIMEFRAME_OPTIONS = [
     {id:'daily',label:'Daily'},{id:'weekly',label:'Weekly'},{id:'monthly',label:'Monthly'},
     {id:'quarterly',label:'Quarterly'},{id:'yearly',label:'Yearly'},
@@ -14343,13 +14398,15 @@ window.tableau = __webpack_exports__;
       const minD = new Date(Math.min(...times)), maxD = new Date(Math.max(...times));
       const spanDays = (maxD-minD)/86400000;
       TODAY = new Date();
+      const endD = maxD>TODAY ? TODAY : maxD;
+      const endIso = isoDate(endD);
+      const minIso = isoDate(minD);
+      const defaultTf = spanDays>150 ? 'monthly' : 'weekly';
+      let startIso = computeStartForPeriodsBack(defaultTf, endIso, 14);
+      if(startIso < minIso) startIso = minIso;
       return {
-        dateRangeDefault: {
-          timeframe: spanDays>150 ? 'monthly' : 'weekly',
-          start: isoDate(minD), end: isoDate(maxD>TODAY?TODAY:maxD)>isoDate(minD) ? isoDate(maxD>TODAY?TODAY:maxD) : isoDate(maxD),
-          hideIncomplete:false
-        },
-        dataMinIso: isoDate(minD), dataMaxIso: isoDate(maxD)
+        dateRangeDefault: { timeframe: defaultTf, start: startIso, end: endIso, hideIncomplete:false, weekStart:'mon' },
+        dataMinIso: minIso, dataMaxIso: isoDate(maxD)
       };
     }
     return { dateRangeDefault: null, dataMinIso:null, dataMaxIso:null };
@@ -14375,7 +14432,7 @@ window.tableau = __webpack_exports__;
       formulas: [],
       selected: new Set(),
       pivot: {active:false, rowDims:[DIM_ORDER[0]||'__period'], colDims: DIM_ORDER[1] ? [DIM_ORDER[1]] : [], valueIds: DEFAULT_VALUE_COLUMNS[0] ? [DEFAULT_VALUE_COLUMNS[0].id] : [], valuesLocation:'columns'},
-      dateRange: DATE_FIELD_ID ? {timeframe:'weekly', start:DATA_BOUNDS.min, end:DATA_BOUNDS.max, hideIncomplete:false} : null
+      dateRange: DATE_FIELD_ID ? {timeframe:'weekly', start:DATA_BOUNDS.min, end:DATA_BOUNDS.max, hideIncomplete:false, weekStart:'mon'} : null
     };
   }
   let state = null;
@@ -14583,23 +14640,25 @@ window.tableau = __webpack_exports__;
       '<div class="dr-field"><label>Start Date</label><input type="date" id="startDateInput" min="'+DATA_BOUNDS.min+'" max="'+DATA_BOUNDS.max+'" value="'+dr.start+'" '+(isTrailing?'disabled':'')+'></div>'+
       '<span class="dr-arrow">\u2192</span>'+
       '<div class="dr-field"><label>End Date</label><input type="date" id="endDateInput" min="'+DATA_BOUNDS.min+'" max="'+DATA_BOUNDS.max+'" value="'+dr.end+'"></div>'+
+      '<div class="dr-field"><label>Week Starts On</label><select id="weekStartSelect"><option value="mon" '+(dr.weekStart!=='sun'?'selected':'')+'>Monday</option><option value="sun" '+(dr.weekStart==='sun'?'selected':'')+'>Sunday</option></select></div>'+
       '<label class="dr-check"><input type="checkbox" id="hideIncompleteChk" '+(dr.hideIncomplete?'checked':'')+'> Hide incomplete period</label>';
 
     document.getElementById('tfSelect').addEventListener('change', e=>{
       state.dateRange.timeframe = e.target.value;
-      if(e.target.value.indexOf('trailing')===0){
-        const n = parseInt(e.target.value.replace('trailing',''),10);
-        state.dateRange.start = isoDate(addDays(parseIsoDate(state.dateRange.end), -(n-1)));
-      }
+      state.dateRange.start = clampStartToData(computeStartForPeriodsBack(e.target.value, state.dateRange.end, 14));
       render();
     });
     document.getElementById('startDateInput').addEventListener('change', e=>{ if(e.target.value) state.dateRange.start = e.target.value; render(); });
     document.getElementById('endDateInput').addEventListener('change', e=>{
       if(!e.target.value) return;
       state.dateRange.end = e.target.value;
-      if(state.dateRange.timeframe.indexOf('trailing')===0){
-        const n = parseInt(state.dateRange.timeframe.replace('trailing',''),10);
-        state.dateRange.start = isoDate(addDays(parseIsoDate(e.target.value), -(n-1)));
+      state.dateRange.start = clampStartToData(computeStartForPeriodsBack(state.dateRange.timeframe, e.target.value, 14));
+      render();
+    });
+    document.getElementById('weekStartSelect').addEventListener('change', e=>{
+      state.dateRange.weekStart = e.target.value;
+      if(state.dateRange.timeframe==='weekly'){
+        state.dateRange.start = clampStartToData(computeStartForPeriodsBack('weekly', state.dateRange.end, 14));
       }
       render();
     });
