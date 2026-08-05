@@ -15502,8 +15502,8 @@ window.tableau = __webpack_exports__;
   const ROLE_LABEL = {dimension:'Dimension', measure:'Measure', date:'Date', exclude:'Exclude'};
   function roleOptionsFor(dataType){
     if(dataType==='date' || dataType==='date-time') return ['date','dimension','exclude'];
-    if(dataType==='int' || dataType==='float') return ['measure','dimension','exclude'];
-    return ['dimension','exclude'];
+    if(dataType==='int' || dataType==='float') return ['measure','dimension','date','exclude'];
+    return ['dimension','date','exclude'];
   }
 
   let tableauFiltersCache = [];
