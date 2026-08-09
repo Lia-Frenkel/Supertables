@@ -14266,8 +14266,18 @@ window.tableau = __webpack_exports__;
   let DATE_FIELD_ID = null;
   let TODAY = new Date();
 
+  // Editor-configurable settings (via the Format Extension dialog), persisted in
+  // tableau.extensions.settings. Currency/Filters Order apply live on save; Default
+  // Timeframe/Week Start/Show Last N Periods only affect what loads on the *next* open —
+  // they're starting defaults, not something that yanks the current viewer's active selection.
+  let CURRENCY_SYMBOL = '$';
+  let SHOW_LAST_N_PERIODS = 14;
+  let FILTERS_ORDER = [];
+  let DEFAULT_WEEK_START = 'mon';
+  let DEFAULT_TIMEFRAME = null; // null = auto-pick by data span, as before
+
   const FORMATTERS = {
-    currency: v => v==null ? '—' : '$'+Math.round(v).toLocaleString('en-US'),
+    currency: v => v==null ? '—' : CURRENCY_SYMBOL+Math.round(v).toLocaleString('en-US'),
     number:   v => v==null ? '—' : Math.round(v).toLocaleString('en-US'),
     decimal2: v => v==null ? '—' : v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
     decimalx: v => v==null ? '—' : v.toFixed(2)+'x',
@@ -14401,11 +14411,11 @@ window.tableau = __webpack_exports__;
       const endD = maxD>TODAY ? TODAY : maxD;
       const endIso = isoDate(endD);
       const minIso = isoDate(minD);
-      const defaultTf = spanDays>150 ? 'monthly' : 'weekly';
-      let startIso = computeStartForPeriodsBack(defaultTf, endIso, 14);
+      const defaultTf = DEFAULT_TIMEFRAME || (spanDays>150 ? 'monthly' : 'weekly');
+      let startIso = computeStartForPeriodsBack(defaultTf, endIso, SHOW_LAST_N_PERIODS);
       if(startIso < minIso) startIso = minIso;
       return {
-        dateRangeDefault: { timeframe: defaultTf, start: startIso, end: endIso, hideIncomplete:false, weekStart:'mon' },
+        dateRangeDefault: { timeframe: defaultTf, start: startIso, end: endIso, hideIncomplete:false, weekStart: DEFAULT_WEEK_START },
         dataMinIso: minIso, dataMaxIso: isoDate(maxD)
       };
     }
@@ -14645,20 +14655,20 @@ window.tableau = __webpack_exports__;
 
     document.getElementById('tfSelect').addEventListener('change', e=>{
       state.dateRange.timeframe = e.target.value;
-      state.dateRange.start = clampStartToData(computeStartForPeriodsBack(e.target.value, state.dateRange.end, 14));
+      state.dateRange.start = clampStartToData(computeStartForPeriodsBack(e.target.value, state.dateRange.end, SHOW_LAST_N_PERIODS));
       render();
     });
     document.getElementById('startDateInput').addEventListener('change', e=>{ if(e.target.value) state.dateRange.start = e.target.value; render(); });
     document.getElementById('endDateInput').addEventListener('change', e=>{
       if(!e.target.value) return;
       state.dateRange.end = e.target.value;
-      state.dateRange.start = clampStartToData(computeStartForPeriodsBack(state.dateRange.timeframe, e.target.value, 14));
+      state.dateRange.start = clampStartToData(computeStartForPeriodsBack(state.dateRange.timeframe, e.target.value, SHOW_LAST_N_PERIODS));
       render();
     });
     document.getElementById('weekStartSelect').addEventListener('change', e=>{
       state.dateRange.weekStart = e.target.value;
       if(state.dateRange.timeframe==='weekly'){
-        state.dateRange.start = clampStartToData(computeStartForPeriodsBack('weekly', state.dateRange.end, 14));
+        state.dateRange.start = clampStartToData(computeStartForPeriodsBack('weekly', state.dateRange.end, SHOW_LAST_N_PERIODS));
       }
       render();
     });
@@ -15051,13 +15061,14 @@ window.tableau = __webpack_exports__;
 
   const FORMAT_LABEL = {number:'Number', currency:'Currency', percent:'Percent'};
   const DEFAULT_DECIMALS = {number:0, currency:2, percent:1, decimalx:2};
-  function formatFormulaValue(v, format, decimals){
+  function formatFormulaValue(v, format, decimals, useGrouping){
     if(v==null) return '—';
     const d = (decimals==null) ? (DEFAULT_DECIMALS[format]!=null ? DEFAULT_DECIMALS[format] : 2) : decimals;
-    if(format==='currency') return '$'+v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
-    if(format==='percent') return (v*100).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+'%';
-    if(format==='decimalx') return v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})+'x';
-    return v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+    const grp = useGrouping!==false;
+    if(format==='currency') return CURRENCY_SYMBOL+v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d,useGrouping:grp});
+    if(format==='percent') return (v*100).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d,useGrouping:grp})+'%';
+    if(format==='decimalx') return v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d,useGrouping:grp})+'x';
+    return v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d,useGrouping:grp});
   }
   // Single place every value cell / pivot cell / chart tooltip / CSV export goes through, so
   // formula columns respect their own format+decimals while native measures keep using the
@@ -15065,7 +15076,7 @@ window.tableau = __webpack_exports__;
   function getFormatterFor(colId){
     const vc = state.valueColumns.find(c=>c.id===colId);
     if(vc && vc.kind==='formula'){
-      return v => formatFormulaValue(v, vc.format, vc.decimals);
+      return v => formatFormulaValue(v, vc.format, vc.decimals, vc.thousands);
     }
     const fmtKey = vc ? vc.format : 'number';
     return FORMATTERS[fmtKey] || FORMATTERS.plain;
@@ -15078,6 +15089,7 @@ window.tableau = __webpack_exports__;
     const prefillExpr = existing ? idsToBracketExpr(existing.expr) : '';
     const prefillFormat = existing ? existing.format : 'number';
     const prefillDecimals = existing && existing.decimals!=null ? existing.decimals : DEFAULT_DECIMALS[prefillFormat];
+    const prefillThousands = existing ? (existing.thousands!==false) : true;
     layer.innerHTML =
       '<div class="modal-backdrop" id="modalBackdrop"><div class="modal">'+
         '<h3>'+(existing?'Edit Formula':'Add Formula')+'</h3>'+
@@ -15093,6 +15105,7 @@ window.tableau = __webpack_exports__;
             [0,1,2,3,4].map(n=>'<option value="'+n+'" '+(n===prefillDecimals?'selected':'')+'>'+n+'</option>').join('')+
           '</select></div>'+
         '</div>'+
+        '<label class="dr-check" style="margin-top:10px;"><input type="checkbox" id="formulaThousands" '+(prefillThousands?'checked':'')+'> Thousands separator</label>'+
         '<div class="err" id="formulaErr"></div>'+
         '<div class="actions"><button class="btn" id="formulaCancel">Cancel</button><button class="btn primary" id="formulaAdd">'+(existing?'Save Changes':'Add Column')+'</button></div>'+
       '</div></div>';
@@ -15109,6 +15122,7 @@ window.tableau = __webpack_exports__;
       const exprRaw = document.getElementById('formulaExpr').value.trim();
       const format = document.getElementById('formulaFormat').value;
       const decimals = parseInt(document.getElementById('formulaDecimals').value, 10);
+      const thousands = document.getElementById('formulaThousands').checked;
       const errEl = document.getElementById('formulaErr');
       if(!name){ errEl.textContent='Give the formula a name.'; return; }
       if(!exprRaw){ errEl.textContent='Enter an expression.'; return; }
@@ -15119,13 +15133,13 @@ window.tableau = __webpack_exports__;
       const test = safeEval(resolved, testScope);
       if(test===null){ errEl.textContent='Could not evaluate this expression — check field references.'; return; }
       if(existing){
-        existing.label = name; existing.expr = resolved; existing.format = format; existing.decimals = decimals;
+        existing.label = name; existing.expr = resolved; existing.format = format; existing.decimals = decimals; existing.thousands = thousands;
         const vc = state.valueColumns.find(c=>c.id===existing.id);
-        if(vc){ vc.label = name; vc.format = format; vc.decimals = decimals; }
+        if(vc){ vc.label = name; vc.format = format; vc.decimals = decimals; vc.thousands = thousands; }
       } else {
         const id = 'f_'+name.toLowerCase().replace(/[^a-z0-9]+/g,'_')+'_'+Date.now().toString(36);
-        state.formulas.push({id, label:name, expr:resolved, format, decimals});
-        state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format, decimals, visible:true});
+        state.formulas.push({id, label:name, expr:resolved, format, decimals, thousands});
+        state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format, decimals, thousands, visible:true});
         state.columnOrder.push(id);
       }
       layer.innerHTML=''; render();
@@ -15454,9 +15468,14 @@ window.tableau = __webpack_exports__;
     if(Array.isArray(saved.editorFormulas)){
       saved.editorFormulas.forEach(f=>{
         if(state.formulas.some(existing=>existing.id===f.id)) return;
-        state.formulas.push({id:f.id, label:f.label, expr:f.expr, format:f.format, isEditorDefault:true});
-        state.valueColumns.push({id:f.id, label:f.label, kind:'formula', agg:'CALC', format:f.format, visible:true, isEditorDefault:true});
-        if(!state.columnOrder.includes(f.id)) state.columnOrder.push(f.id);
+        state.formulas.push({id:f.id, label:f.label, expr:f.expr, format:f.format, decimals:f.decimals, thousands:f.thousands, isEditorDefault:true, overridesNativeId:f.overridesNativeId||null});
+        if(f.overridesNativeId){
+          const vc = state.valueColumns.find(c=>c.id===f.overridesNativeId);
+          if(vc){ vc.agg='CALC'; vc.isEditorDefault=true; vc.overriddenNative=true; if(f.format) vc.format=f.format; vc.decimals=f.decimals; vc.thousands=f.thousands; }
+        } else {
+          state.valueColumns.push({id:f.id, label:f.label, kind:'formula', agg:'CALC', format:f.format, decimals:f.decimals, thousands:f.thousands, visible:true, isEditorDefault:true});
+          if(!state.columnOrder.includes(f.id)) state.columnOrder.push(f.id);
+        }
       });
     }
     if(Array.isArray(saved.hiddenValueIds)){
@@ -15479,7 +15498,12 @@ window.tableau = __webpack_exports__;
       columnOrder: state.columnOrder,
       hiddenValueIds: state.valueColumns.filter(c=>!c.visible).map(c=>c.id),
       groupBy: Array.from(state.groupBy),
-      editorFormulas: state.formulas.filter(f=>f.isEditorDefault).map(f=>({id:f.id, label:f.label, expr:f.expr, format:f.format}))
+      editorFormulas: state.formulas.filter(f=>f.isEditorDefault).map(f=>({id:f.id, label:f.label, expr:f.expr, format:f.format, decimals:f.decimals, thousands:f.thousands, overridesNativeId:f.overridesNativeId||null})),
+      currencySymbol: CURRENCY_SYMBOL,
+      weekStart: DEFAULT_WEEK_START,
+      defaultTimeframe: DEFAULT_TIMEFRAME,
+      showLastNPeriods: SHOW_LAST_N_PERIODS,
+      filtersOrder: FILTERS_ORDER
     };
     tableau.extensions.settings.set('supertableDefaults', JSON.stringify(payload));
     tableau.extensions.settings.saveAsync().then(()=> showToast('Saved as default for all viewers'));
@@ -15515,20 +15539,29 @@ window.tableau = __webpack_exports__;
     }).catch(err=>{ console.warn('getFiltersAsync failed:', err); });
   }
   function fmtFilterVal(dv){ if(!dv) return '—'; return (dv.formattedValue!=null && dv.formattedValue!=='') ? dv.formattedValue : String(dv.value); }
+  function orderedTableauFilters(){
+    if(!FILTERS_ORDER.length) return tableauFiltersCache;
+    return [...tableauFiltersCache].sort((a,b)=>{
+      const ai = FILTERS_ORDER.indexOf(stripWrapper(a.fieldName).bare);
+      const bi = FILTERS_ORDER.indexOf(stripWrapper(b.fieldName).bare);
+      return (ai===-1?999:ai) - (bi===-1?999:bi);
+    });
+  }
   function renderTableauFiltersBar(){
     const el = document.getElementById('tableauFilters');
-    const pills = tableauFiltersCache.map((f,i)=>{
+    const ordered = orderedTableauFilters();
+    const pills = ordered.map(f=>{
       let summary = '';
       if(f.filterType==='categorical') summary = f.isAllSelected ? 'All' : (f.appliedValues.length+' selected');
       else if(f.filterType==='range') summary = fmtFilterVal(f.minValue)+' – '+fmtFilterVal(f.maxValue);
       else if(f.filterType==='relativeDate') summary = 'relative date';
       else summary = 'hierarchical';
-      return '<button class="tf-btn" data-idx="'+i+'">'+escapeHtml(stripWrapper(f.fieldName).bare)+': '+escapeHtml(summary)+'<span class="tf-caret">▾</span></button>';
+      return '<button class="tf-btn" data-name="'+escapeAttr(f.fieldName)+'">'+escapeHtml(stripWrapper(f.fieldName).bare)+': '+escapeHtml(summary)+'<span class="tf-caret">▾</span></button>';
     }).join('');
     el.innerHTML = '<span class="tf-label">Filters</span>' + pills +
       '<button class="tf-reset" id="btnResetAllFilters">Reset All Filters</button>';
     el.querySelectorAll('.tf-btn').forEach(btn=>{
-      btn.addEventListener('click', ()=> openTableauFilterPopover(btn, tableauFiltersCache[parseInt(btn.getAttribute('data-idx'),10)]));
+      btn.addEventListener('click', ()=> openTableauFilterPopover(btn, tableauFiltersCache.find(f=>f.fieldName===btn.getAttribute('data-name'))));
     });
     document.getElementById('btnResetAllFilters').addEventListener('click', resetAllFilters);
   }
@@ -15603,6 +15636,15 @@ window.tableau = __webpack_exports__;
 
       fieldRoleOverrides = loadFieldRoleOverrides();
 
+      const savedGeneral = loadSavedDefaults();
+      if(savedGeneral){
+        if(savedGeneral.currencySymbol) CURRENCY_SYMBOL = savedGeneral.currencySymbol;
+        if(savedGeneral.showLastNPeriods) SHOW_LAST_N_PERIODS = savedGeneral.showLastNPeriods;
+        if(savedGeneral.weekStart) DEFAULT_WEEK_START = savedGeneral.weekStart;
+        if(savedGeneral.defaultTimeframe) DEFAULT_TIMEFRAME = savedGeneral.defaultTimeframe;
+        if(Array.isArray(savedGeneral.filtersOrder)) FILTERS_ORDER = savedGeneral.filtersOrder;
+      }
+
       const dataTable = await fetchWorksheetData(currentWorksheet);
       const schemaInfo = buildSchemaAndRows(dataTable);
       DATA_BOUNDS.min = schemaInfo.dataMinIso;
@@ -15610,7 +15652,7 @@ window.tableau = __webpack_exports__;
 
       state = defaultState();
       if(schemaInfo.dateRangeDefault) state.dateRange = schemaInfo.dateRangeDefault;
-      applySavedDefaults(loadSavedDefaults());
+      applySavedDefaults(savedGeneral);
 
       document.getElementById('loadingScreen').classList.add('hidden');
       document.getElementById('appRoot').classList.remove('hidden');
@@ -15669,10 +15711,8 @@ window.tableau = __webpack_exports__;
 
   function applyEditorFormulas(formulaDefs){
     if(!state) return;
-    const oldIds = state.formulas.filter(f=>f.isEditorDefault).map(f=>f.id);
     state.formulas = state.formulas.filter(f=>!f.isEditorDefault);
-    state.valueColumns = state.valueColumns.filter(c=>!c.isEditorDefault);
-    state.columnOrder = state.columnOrder.filter(id=>!oldIds.includes(id));
+    state.valueColumns = state.valueColumns.filter(c=>!(c.isEditorDefault && !c.overriddenNative));
 
     formulaDefs.forEach(def=>{
       const name = (def.name||'').trim();
@@ -15682,10 +15722,26 @@ window.tableau = __webpack_exports__;
       if(error) return;
       const testScope = {}; DEFAULT_VALUE_COLUMNS.forEach(c=>testScope[c.id]=1);
       if(safeEval(resolved, testScope)===null) return;
-      const id = 'f_'+name.toLowerCase().replace(/[^a-z0-9]+/g,'_')+'_'+Date.now().toString(36)+Math.floor(Math.random()*1000);
-      state.formulas.push({id, label:name, expr:resolved, format:def.format||'decimalx', isEditorDefault:true});
-      state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format:def.format||'decimalx', visible:true, isEditorDefault:true});
-      state.columnOrder.push(id);
+
+      const nativeMatch = DEFAULT_VALUE_COLUMNS.find(c=>c.label.toLowerCase()===name.toLowerCase());
+      if(nativeMatch){
+        // Name collision with a native measure: redefine how that column is calculated
+        // instead of adding a duplicate. applyFormulas() evaluates every formula against a
+        // fixed snapshot of the raw sums, so this only changes what's *displayed* for this
+        // column — other formulas referencing it still see the true raw value.
+        state.formulas.push({id:nativeMatch.id, label:name, expr:resolved, format:def.format||nativeMatch.format, decimals:def.decimals, thousands:def.thousands, isEditorDefault:true, overridesNativeId:nativeMatch.id});
+        const vc = state.valueColumns.find(c=>c.id===nativeMatch.id);
+        if(vc){
+          vc.agg = 'CALC'; vc.isEditorDefault = true; vc.overriddenNative = true;
+          if(def.format) vc.format = def.format;
+          vc.decimals = def.decimals; vc.thousands = def.thousands;
+        }
+      } else {
+        const id = 'f_'+name.toLowerCase().replace(/[^a-z0-9]+/g,'_')+'_'+Date.now().toString(36)+Math.floor(Math.random()*1000);
+        state.formulas.push({id, label:name, expr:resolved, format:def.format||'number', decimals:def.decimals, thousands:def.thousands, isEditorDefault:true});
+        state.valueColumns.push({id, label:name, kind:'formula', agg:'CALC', format:def.format||'number', decimals:def.decimals, thousands:def.thousands, visible:true, isEditorDefault:true});
+        state.columnOrder.push(id);
+      }
     });
     saveDefaultsFromCurrentState();
     render();
@@ -15700,15 +15756,35 @@ window.tableau = __webpack_exports__;
       return {fieldName:c.fieldName, bare:parsed.bare, dataType:c.dataType, current: effectiveRole(c.fieldName, c.dataType)};
     }) : [];
     const payload = JSON.stringify({
-      formulas: editorFormulas.map(f=>({name:f.label, expr:idsToBracketExpr(f.expr), format:f.format})),
+      formulas: editorFormulas.map(f=>({name:f.label, expr:idsToBracketExpr(f.expr), format:f.format, decimals:f.decimals, thousands:f.thousands})),
       availableFieldNames: DEFAULT_VALUE_COLUMNS.map(c=>c.label),
+      availableFilterFields: TOPFILTER_DIMS.map(id=>DIM_META[id].label),
+      filtersOrder: FILTERS_ORDER,
+      timeframeOptions: TIMEFRAME_OPTIONS,
+      generalSettings: {currencySymbol:CURRENCY_SYMBOL, weekStart:DEFAULT_WEEK_START, defaultTimeframe:DEFAULT_TIMEFRAME||'', showLastNPeriods:SHOW_LAST_N_PERIODS},
       fields: fields
     });
     const popupUrl = location.origin + location.pathname + '?dialog=configure';
-    tableau.extensions.ui.displayDialogAsync(popupUrl, payload, {height:680, width:640}).then(closePayload=>{
+    tableau.extensions.ui.displayDialogAsync(popupUrl, payload, {height:720, width:680}).then(closePayload=>{
       let result;
       try{ result = JSON.parse(closePayload); }catch(e){ return; }
       if(!result || result.cancelled) return;
+
+      if(result.generalSettings){
+        const gs = result.generalSettings;
+        if(gs.currencySymbol) CURRENCY_SYMBOL = gs.currencySymbol;
+        if(gs.showLastNPeriods) SHOW_LAST_N_PERIODS = gs.showLastNPeriods;
+        DEFAULT_TIMEFRAME = gs.defaultTimeframe || null;
+        DEFAULT_WEEK_START = gs.weekStart || 'mon';
+        if(state && state.dateRange && gs.weekStart){
+          state.dateRange.weekStart = gs.weekStart;
+          if(state.dateRange.timeframe==='weekly'){
+            state.dateRange.start = clampStartToData(computeStartForPeriodsBack('weekly', state.dateRange.end, SHOW_LAST_N_PERIODS));
+          }
+        }
+      }
+      if(Array.isArray(result.filtersOrder)) FILTERS_ORDER = result.filtersOrder;
+
       if(result.fieldRoles && fields.length){
         fieldRoleOverrides = result.fieldRoles;
         saveFieldRoleOverrides(fieldRoleOverrides).then(()=>{
@@ -15768,7 +15844,12 @@ window.tableau = __webpack_exports__;
   function renderConfigureDialogUI(initial){
     const availableNames = initial.availableFieldNames || [];
     const fieldRows = initial.fields || [];
-    const rows = (initial.formulas || []).map(f=>({name:f.name||'', expr:f.expr||'', format:f.format||'decimalx'}));
+    const timeframeOptions = initial.timeframeOptions || [];
+    const gs = initial.generalSettings || {};
+    const rows = (initial.formulas || []).map(f=>({name:f.name||'', expr:f.expr||'', format:f.format||'number', decimals: f.decimals!=null?f.decimals:2, thousands: f.thousands!==false}));
+    const allFilterFields = initial.availableFilterFields || [];
+    let filterOrderList = (initial.filtersOrder||[]).filter(n=>allFilterFields.includes(n));
+    allFilterFields.forEach(n=>{ if(!filterOrderList.includes(n)) filterOrderList.push(n); });
     const root = document.getElementById('cfgDialogRoot');
     const FORMAT_LABEL = {currency:'Currency', percent:'Percent', number:'Number'};
 
@@ -15788,12 +15869,18 @@ window.tableau = __webpack_exports__;
       return '<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:8px;padding:10px;border:1px solid #E6E6EE;border-radius:10px;background:#FAFAFC;">'+
         '<div style="flex:1;min-width:0;">'+
           '<input id="cfgName'+i+'" type="text" placeholder="Name (e.g. CPA)" value="'+escapeAttr(r.name)+'" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;margin-bottom:5px;box-sizing:border-box;font-family:inherit;">'+
-          '<input id="cfgExpr'+i+'" type="text" placeholder="e.g. [Cost] / [Total Leads]" value="'+escapeAttr(r.expr)+'" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;box-sizing:border-box;font-family:inherit;">'+
+          '<input id="cfgExpr'+i+'" type="text" placeholder="e.g. [Cost] / [Total Leads]" value="'+escapeAttr(r.expr)+'" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;box-sizing:border-box;font-family:inherit;margin-bottom:5px;">'+
+          '<div style="display:flex;gap:8px;align-items:center;">'+
+            '<select id="cfgFormat'+i+'" style="font-size:12px;padding:4px 5px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+              Object.keys(FORMAT_LABEL).map(f=>'<option value="'+f+'" '+(r.format===f?'selected':'')+'>'+FORMAT_LABEL[f]+'</option>').join('')+
+            '</select>'+
+            '<label style="font-size:11.5px;color:#565A7E;display:flex;align-items:center;gap:4px;">Decimals <select id="cfgDecimals'+i+'" style="font-size:12px;padding:3px 4px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+              [0,1,2,3,4].map(n=>'<option value="'+n+'" '+(n===r.decimals?'selected':'')+'>'+n+'</option>').join('')+
+            '</select></label>'+
+            '<label style="font-size:11.5px;color:#565A7E;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="cfgThousands'+i+'" '+(r.thousands?'checked':'')+'> Thousands separator</label>'+
+          '</div>'+
           '<div id="cfgErr'+i+'" style="font-size:11px;color:#C2255C;min-height:14px;margin-top:3px;"></div>'+
         '</div>'+
-        '<select id="cfgFormat'+i+'" style="font-size:12px;padding:6px 7px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
-          Object.keys(FORMAT_LABEL).map(f=>'<option value="'+f+'" '+(r.format===f?'selected':'')+'>'+FORMAT_LABEL[f]+'</option>').join('')+
-        '</select>'+
         '<button id="cfgRemove'+i+'" title="Remove" style="border:none;background:none;color:#9094AD;font-size:18px;cursor:pointer;line-height:1;padding:4px;">×</button>'+
       '</div>';
     }
@@ -15802,11 +15889,56 @@ window.tableau = __webpack_exports__;
       if(!r.expr){ errEl.textContent=''; return; }
       errEl.textContent = validateExprSyntax(r.expr, availableNames) ? '' : 'Check field references and syntax';
     }
+    function filterOrderRowHtml(name){
+      return '<div class="cfg-order-row" draggable="true" data-name="'+escapeAttr(name)+'" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #E6E6EE;border-radius:8px;margin-bottom:5px;background:#fff;cursor:grab;font-size:12.5px;">'+
+        '<span style="color:#C9C7E8;font-size:12px;">\u28FE</span><span>'+escapeHtml(name)+'</span></div>';
+    }
+    function renderFilterOrderList(){
+      const listEl = document.getElementById('cfgFilterOrderList');
+      if(!listEl) return;
+      listEl.innerHTML = filterOrderList.map(n=>filterOrderRowHtml(n)).join('') || '<p style="font-size:12px;color:#9094AD;">No filter fields detected yet.</p>';
+      listEl.querySelectorAll('.cfg-order-row').forEach(row=>{
+        row.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', row.getAttribute('data-name')); });
+        row.addEventListener('dragover', e=>{ e.preventDefault(); row.style.borderColor='#5B4EE8'; });
+        row.addEventListener('dragleave', ()=>{ row.style.borderColor='#E6E6EE'; });
+        row.addEventListener('drop', e=>{
+          e.preventDefault(); row.style.borderColor='#E6E6EE';
+          const draggedName = e.dataTransfer.getData('text/plain');
+          const targetName = row.getAttribute('data-name');
+          if(draggedName===targetName) return;
+          const fromIdx = filterOrderList.indexOf(draggedName);
+          if(fromIdx===-1) return;
+          filterOrderList.splice(fromIdx,1);
+          const toIdx = filterOrderList.indexOf(targetName);
+          filterOrderList.splice(toIdx,0,draggedName);
+          renderFilterOrderList();
+        });
+      });
+    }
+
     function renderRows(){
       root.innerHTML =
         '<div style="padding:18px;">'+
           '<h2 style="margin:0 0 4px;font-size:16px;color:#1F2152;">Configure SuperTable</h2>'+
-          '<p style="margin:0 0 16px;font-size:12px;color:#565A7E;">Editor-only settings — end users never see this screen.</p>'+
+          '<p style="margin:0 0 16px;font-size:12px;color:#565A7E;">Editor-only settings — end users never see this screen. These are starting defaults; viewers can still change Timeframe and the date range themselves.</p>'+
+
+          '<h3 style="margin:0 0 8px;font-size:13px;color:#1F2152;">General Settings</h3>'+
+          '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px;">'+
+            '<div><label style="display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;margin-bottom:4px;">Currency Symbol</label>'+
+              '<input type="text" id="cfgCurrency" maxlength="3" value="'+escapeAttr(gs.currencySymbol||'$')+'" style="width:56px;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;text-align:center;"></div>'+
+            '<div><label style="display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;margin-bottom:4px;">Week Start Day</label>'+
+              '<select id="cfgWeekStart" style="font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+                '<option value="mon" '+(gs.weekStart!=='sun'?'selected':'')+'>Monday</option>'+
+                '<option value="sun" '+(gs.weekStart==='sun'?'selected':'')+'>Sunday</option>'+
+              '</select></div>'+
+            '<div><label style="display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;margin-bottom:4px;">Default Timeframe</label>'+
+              '<select id="cfgDefaultTf" style="font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+                '<option value="">(auto by data span)</option>'+
+                timeframeOptions.map(o=>'<option value="'+o.id+'" '+(o.id===gs.defaultTimeframe?'selected':'')+'>'+o.label+'</option>').join('')+
+              '</select></div>'+
+            '<div><label style="display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;margin-bottom:4px;">Show Last N Periods</label>'+
+              '<input type="number" id="cfgShowLastN" min="1" max="52" value="'+(gs.showLastNPeriods||14)+'" style="width:64px;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;"></div>'+
+          '</div>'+
 
           '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Field Roles</h3>'+
           '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Every field currently on the Marks card, and what SuperTable treats it as. Fix anything wrong here — e.g. a numeric ID that should be a Dimension, not a Measure.</p>'+
@@ -15823,8 +15955,12 @@ window.tableau = __webpack_exports__;
               '</div>'
             : '<p style="font-size:12px;color:#C2255C;margin-bottom:18px;">No fields detected yet — add fields to the Detail tile on the Marks card, then reopen this dialog.</p>')+
 
-          '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Calculated Fields</h3>'+
-          '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Reference native measures exactly as named, in [brackets]. Supports + − × ÷, parentheses, and MAX()/MIN().</p>'+
+          '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Filters Order</h3>'+
+          '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Controls the left-to-right order filters appear in on the Filters panel. Drag to reorder.</p>'+
+          '<div id="cfgFilterOrderList" style="max-height:180px;overflow:auto;margin-bottom:18px;"></div>'+
+
+          '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Calculated Metric Formulas</h3>'+
+          '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Reference native measures exactly as named, in [brackets]. Supports + − × ÷, parentheses, and MAX()/MIN(). If a name matches an existing measure, this replaces how it\'s calculated instead of adding a new column.</p>'+
           (availableNames.length
             ? '<div style="margin-bottom:14px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#9094AD;font-weight:600;margin-bottom:5px;">Available measures</div><div style="display:flex;flex-wrap:wrap;gap:5px;">'+availableNames.map(n=>'<span style="font-size:11px;background:#EEEBFC;color:#4A3DD6;padding:2px 8px;border-radius:999px;">'+escapeHtml(n)+'</span>').join('')+'</div></div>'
             : '')+
@@ -15835,19 +15971,24 @@ window.tableau = __webpack_exports__;
             '<button id="cfgDialogSave" style="font-size:12.5px;font-weight:600;color:#fff;background:#5B4EE8;border:1px solid #5B4EE8;border-radius:8px;padding:7px 14px;cursor:pointer;font-family:inherit;">Save</button>'+
           '</div>'+
         '</div>';
+      renderFilterOrderList();
       rows.forEach((r,i)=>{
         const nameEl = document.getElementById('cfgName'+i);
         const exprEl = document.getElementById('cfgExpr'+i);
         const fmtEl = document.getElementById('cfgFormat'+i);
+        const decEl = document.getElementById('cfgDecimals'+i);
+        const thouEl = document.getElementById('cfgThousands'+i);
         const removeEl = document.getElementById('cfgRemove'+i);
         const errEl = document.getElementById('cfgErr'+i);
         if(nameEl) nameEl.addEventListener('input', ()=>{ r.name = nameEl.value; });
         if(exprEl) exprEl.addEventListener('input', ()=>{ r.expr = exprEl.value; validateRow(r, errEl); });
         if(fmtEl) fmtEl.addEventListener('change', ()=>{ r.format = fmtEl.value; });
+        if(decEl) decEl.addEventListener('change', ()=>{ r.decimals = parseInt(decEl.value,10); });
+        if(thouEl) thouEl.addEventListener('change', ()=>{ r.thousands = thouEl.checked; });
         if(removeEl) removeEl.addEventListener('click', ()=>{ rows.splice(i,1); renderRows(); });
         validateRow(r, errEl);
       });
-      document.getElementById('cfgAddRow').addEventListener('click', ()=>{ rows.push({name:'', expr:'', format:'decimalx'}); renderRows(); });
+      document.getElementById('cfgAddRow').addEventListener('click', ()=>{ rows.push({name:'', expr:'', format:'number', decimals:2, thousands:true}); renderRows(); });
       document.getElementById('cfgDialogCancel').addEventListener('click', ()=>{ tableau.extensions.ui.closeDialog(JSON.stringify({cancelled:true})); });
       document.getElementById('cfgDialogSave').addEventListener('click', ()=>{
         let hasError = false;
@@ -15857,7 +15998,7 @@ window.tableau = __webpack_exports__;
           const expr = (r.expr||'').trim();
           if(!name && !expr) return;
           if(!name || !expr || !validateExprSyntax(expr, availableNames)){ hasError = true; return; }
-          clean.push({name, expr, format:r.format||'decimalx'});
+          clean.push({name, expr, format:r.format||'number', decimals: r.decimals!=null?r.decimals:2, thousands: r.thousands!==false});
         });
         if(hasError){ window.alert('Fix the highlighted rows before saving.'); return; }
         const fieldRoles = {};
@@ -15865,7 +16006,16 @@ window.tableau = __webpack_exports__;
           const sel = document.getElementById('cfgRole'+i);
           if(sel) fieldRoles[sel.getAttribute('data-field')] = sel.value;
         });
-        tableau.extensions.ui.closeDialog(JSON.stringify({cancelled:false, formulas:clean, fieldRoles:fieldRoles}));
+        const generalSettings = {
+          currencySymbol: (document.getElementById('cfgCurrency').value.trim() || '$'),
+          weekStart: document.getElementById('cfgWeekStart').value,
+          defaultTimeframe: document.getElementById('cfgDefaultTf').value,
+          showLastNPeriods: parseInt(document.getElementById('cfgShowLastN').value,10) || 14
+        };
+        tableau.extensions.ui.closeDialog(JSON.stringify({
+          cancelled:false, formulas:clean, fieldRoles:fieldRoles,
+          generalSettings: generalSettings, filtersOrder: filterOrderList
+        }));
       });
     }
     renderRows();
