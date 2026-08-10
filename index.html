@@ -14650,7 +14650,6 @@ window.tableau = __webpack_exports__;
       '<div class="dr-field"><label>Start Date</label><input type="date" id="startDateInput" min="'+DATA_BOUNDS.min+'" max="'+DATA_BOUNDS.max+'" value="'+dr.start+'" '+(isTrailing?'disabled':'')+'></div>'+
       '<span class="dr-arrow">\u2192</span>'+
       '<div class="dr-field"><label>End Date</label><input type="date" id="endDateInput" min="'+DATA_BOUNDS.min+'" max="'+DATA_BOUNDS.max+'" value="'+dr.end+'"></div>'+
-      '<div class="dr-field"><label>Week Starts On</label><select id="weekStartSelect"><option value="mon" '+(dr.weekStart!=='sun'?'selected':'')+'>Monday</option><option value="sun" '+(dr.weekStart==='sun'?'selected':'')+'>Sunday</option></select></div>'+
       '<label class="dr-check"><input type="checkbox" id="hideIncompleteChk" '+(dr.hideIncomplete?'checked':'')+'> Hide incomplete period</label>';
 
     document.getElementById('tfSelect').addEventListener('change', e=>{
@@ -14663,13 +14662,6 @@ window.tableau = __webpack_exports__;
       if(!e.target.value) return;
       state.dateRange.end = e.target.value;
       state.dateRange.start = clampStartToData(computeStartForPeriodsBack(state.dateRange.timeframe, e.target.value, SHOW_LAST_N_PERIODS));
-      render();
-    });
-    document.getElementById('weekStartSelect').addEventListener('change', e=>{
-      state.dateRange.weekStart = e.target.value;
-      if(state.dateRange.timeframe==='weekly'){
-        state.dateRange.start = clampStartToData(computeStartForPeriodsBack('weekly', state.dateRange.end, SHOW_LAST_N_PERIODS));
-      }
       render();
     });
     document.getElementById('hideIncompleteChk').addEventListener('change', e=>{ state.dateRange.hideIncomplete = e.target.checked; render(); });
