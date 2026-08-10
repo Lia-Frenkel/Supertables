@@ -59,15 +59,24 @@
   .spacer{flex:1;}
   .sel-count{font-size:11.5px;color:var(--ink-soft);margin-right:2px;}
 
-  .topfilters{position:relative;padding:14px 130px 14px 14px;border-top:1px solid var(--line);}
-  .tf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 10px;}
-  .tf-btn{display:flex;align-items:center;justify-content:space-between;gap:6px;height:30px;font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:0 8px 0 10px;cursor:pointer;color:var(--ink);width:100%;box-sizing:border-box;}
+  .topfilters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 20px;padding:12px 16px;border-top:1px solid var(--line);}
+  .tf-btn{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;min-width:150px;font-size:13px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 10px;cursor:pointer;color:var(--ink);font-family:inherit;}
   .tf-btn span.tf-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .tf-btn:hover{border-color:var(--line-strong);background:#FAFAFC;}
-  .tf-btn.tf-active{border-color:var(--accent-soft-strong);color:var(--accent-ink);font-weight:600;}
-  .tf-caret{font-size:9px;opacity:.6;flex:none;color:var(--ink-faint);}
-  .tf-reset{position:absolute;top:16px;right:14px;font-size:11.5px;font-weight:600;color:var(--accent-ink);background:none;border:none;cursor:pointer;text-decoration:underline;padding:2px;}
-  .tf-reset:hover{color:var(--accent);}
+  .tf-btn:hover{background:#FAFAFB;}
+  .tf-btn.tf-active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);}
+  .tf-caret{font-size:10px;flex:none;color:var(--ink-faint);}
+  .tf-reset{flex:none;margin-left:auto;align-self:flex-end;border:1px solid var(--line);border-radius:8px;background:none;color:var(--accent-ink);font-size:12px;font-weight:600;padding:7px 12px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+  .tf-reset:hover{background:var(--accent-soft);}
+  .tf-popup-search{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:12px;font-family:inherit;color:var(--ink);outline:none;margin-bottom:6px;}
+  .tf-popup-search:focus{border-color:var(--accent);}
+  .tf-popup-actions{display:flex;justify-content:space-between;align-items:center;padding:2px 4px 6px;}
+  .tf-popup-actions button{background:none;border:none;color:var(--accent-ink);font-size:11px;font-weight:600;cursor:pointer;padding:0;font-family:inherit;}
+  .tf-popup-list{max-height:220px;overflow-y:auto;}
+  .tf-popup-item{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;font-size:13px;color:var(--ink);cursor:pointer;}
+  .tf-popup-item:hover{background:#FAFAFB;}
+  .tf-popup-item input[type=checkbox]{accent-color:var(--accent);width:14px;height:14px;cursor:pointer;flex:none;}
+  .tf-popup-apply{display:block;width:100%;margin-top:8px;padding:7px 0;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;box-sizing:border-box;}
+  .tf-popup-apply:hover{background:var(--accent-ink);}
 
   .pipeline{background:var(--pivot-head);color:var(--ink-soft);font-size:11px;padding:8px 12px;display:flex;align-items:center;flex-wrap:wrap;border-radius:0 0 var(--radius) var(--radius);overflow-x:auto;border-top:1px solid var(--line);}
   .pipeline .step{display:flex;align-items:center;gap:6px;white-space:nowrap;padding:2px 0;}
@@ -15552,16 +15561,19 @@ window.tableau = __webpack_exports__;
   function renderTableauFiltersBar(){
     const el = document.getElementById('tableauFilters');
     const ordered = orderedTableauFilters();
-    const buttons = ordered.map(f=>{
-      let summary = '', isActive = false;
-      if(f.filterType==='categorical'){ isActive = !f.isAllSelected; summary = f.isAllSelected ? 'All' : (f.appliedValues.length+' selected'); }
-      else if(f.filterType==='range'){ isActive = true; summary = fmtFilterVal(f.minValue)+' – '+fmtFilterVal(f.maxValue); }
-      else if(f.filterType==='relativeDate'){ isActive = true; summary = 'relative date'; }
-      else { isActive = true; summary = 'hierarchical'; }
+    el.innerHTML = ordered.map(f=>{
       const bare = stripWrapper(f.fieldName).bare;
-      return '<button class="tf-btn'+(isActive?' tf-active':'')+'" data-name="'+escapeAttr(f.fieldName)+'" title="'+escapeAttr(bare+': '+summary)+'"><span class="tf-name">'+escapeHtml(bare)+'</span><span class="tf-caret">▾</span></button>';
-    }).join('');
-    el.innerHTML = '<div class="tf-grid">'+buttons+'</div>'+
+      let isActive, countSuffix = '';
+      if(f.filterType==='categorical'){
+        // isAllSelected is Tableau's own direct signal for "nothing narrowed", independent of
+        // domain size — the (relevant) domain shrinks as OTHER filters narrow, which would
+        // otherwise make this filter wrongly look unfiltered whenever a sibling filter happens
+        // to squeeze the relevant set down to match this one's current selection.
+        isActive = !f.isAllSelected;
+        countSuffix = isActive ? ' ('+f.appliedValues.length+')' : '';
+      } else { isActive = true; }
+      return '<button class="tf-btn'+(isActive?' tf-active':'')+'" data-name="'+escapeAttr(f.fieldName)+'"><span class="tf-name">'+escapeHtml(bare+countSuffix)+'</span><span class="tf-caret">▾</span></button>';
+    }).join('') +
       '<button class="tf-reset" id="btnResetAllFilters">Reset All Filters</button>';
     el.querySelectorAll('.tf-btn').forEach(btn=>{
       btn.addEventListener('click', ()=> openTableauFilterPopover(btn, tableauFiltersCache.find(f=>f.fieldName===btn.getAttribute('data-name'))));
@@ -15584,23 +15596,35 @@ window.tableau = __webpack_exports__;
   function openTableauFilterPopover(anchor, filter){
     if(filter.filterType==='categorical'){
       filter.getDomainAsync(tableau.FilterDomainType.Relevant).then(domain=>{
-        const seen = {};
-        const options = domain.values.map(dv=>{ const key=String(dv.value); seen[key]=dv.value; return {key, label:fmtFilterVal(dv)}; });
-        const appliedKeys = new Set(filter.isAllSelected ? options.map(o=>o.key) : filter.appliedValues.map(dv=>String(dv.value)));
-        const html = '<div class="p-title">'+escapeHtml(stripWrapper(filter.fieldName).bare)+'</div>'+
-          '<div class="p-links"><span class="p-link" data-act="all">Select all</span><span class="p-link" data-act="none">Clear</span></div>'+
-          options.map(o=>'<label><input type="checkbox" data-val="'+escapeAttr(o.key)+'" '+(appliedKeys.has(o.key)?'checked':'')+'> '+escapeHtml(o.label)+'</label>').join('');
+        const valueByKey = {};
+        const options = domain.values.map(dv=>{ const key=String(dv.value); valueByKey[key]=dv.value; return {key, label:fmtFilterVal(dv)}; });
+        // Relevant may not include something already applied (narrowed away by another
+        // filter since) — still list it so it can be seen/unchecked.
+        filter.appliedValues.forEach(dv=>{ const key=String(dv.value); if(!(key in valueByKey)){ valueByKey[key]=dv.value; options.push({key, label:fmtFilterVal(dv)}); } });
+        const appliedKeys = filter.isAllSelected ? options.map(o=>o.key) : filter.appliedValues.map(dv=>String(dv.value));
+        const selectedSet = new Set(appliedKeys);
+        const html =
+          '<input type="text" class="tf-popup-search" placeholder="Search...">'+
+          '<div class="tf-popup-actions"><button type="button" data-act="all">All</button><button type="button" data-act="none">None</button></div>'+
+          '<div class="tf-popup-list">'+options.map(o=>'<label class="tf-popup-item"><input type="checkbox" value="'+escapeAttr(o.key)+'" '+(selectedSet.has(o.key)?'checked':'')+'><span>'+escapeHtml(o.label)+'</span></label>').join('')+'</div>'+
+          '<button type="button" class="tf-popup-apply">Apply</button>';
         const div = openPopover(anchor, html);
-        function commit(){
-          const checkedKeys = Array.from(div.querySelectorAll('input[type=checkbox]:checked')).map(cb=>cb.getAttribute('data-val'));
+        div.style.minWidth = '240px'; div.style.maxWidth = '420px';
+        const searchInput = div.querySelector('.tf-popup-search');
+        const items = Array.from(div.querySelectorAll('.tf-popup-item'));
+        searchInput.addEventListener('input', ()=>{
+          const q = searchInput.value.trim().toLowerCase();
+          items.forEach(item=>{ const label = item.querySelector('span').textContent.toLowerCase(); item.style.display = (!q || label.indexOf(q)!==-1) ? '' : 'none'; });
+        });
+        div.querySelector('[data-act="all"]').addEventListener('click', ()=>{ items.forEach(item=> item.querySelector('input').checked = true); });
+        div.querySelector('[data-act="none"]').addEventListener('click', ()=>{ items.forEach(item=> item.querySelector('input').checked = false); });
+        div.querySelector('.tf-popup-apply').addEventListener('click', ()=>{
+          const checkedKeys = items.filter(item=>item.querySelector('input').checked).map(item=>item.querySelector('input').value);
           const promise = checkedKeys.length===options.length
             ? currentWorksheet.clearFilterAsync(filter.fieldName)
-            : currentWorksheet.applyFilterAsync(filter.fieldName, checkedKeys.map(k=>seen[k]), tableau.FilterUpdateType.Replace);
-          promise.then(refreshTableauFilters).catch(err=>{ console.warn('applyFilterAsync failed:', err); });
-        }
-        div.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.addEventListener('change', commit));
-        div.querySelector('[data-act="all"]').addEventListener('click', ()=>{ div.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=true); commit(); });
-        div.querySelector('[data-act="none"]').addEventListener('click', ()=>{ div.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=false); commit(); });
+            : currentWorksheet.applyFilterAsync(filter.fieldName, checkedKeys.map(k=>valueByKey[k]), tableau.FilterUpdateType.Replace);
+          promise.then(()=>{ closePopover(); refreshTableauFilters(); }).catch(err=>{ console.warn('applyFilterAsync failed:', err); });
+        });
       }).catch(err=>{ console.warn('getDomainAsync failed:', err); });
     } else if(filter.filterType==='range'){
       const minV = filter.minValue ? filter.minValue.value : '';
@@ -15610,15 +15634,14 @@ window.tableau = __webpack_exports__;
         '<input type="number" id="rfMin" style="width:80px;" value="'+escapeAttr(minV)+'" placeholder="min">'+
         '<input type="number" id="rfMax" style="width:80px;" value="'+escapeAttr(maxV)+'" placeholder="max">'+
         '</div>'+
-        '<div class="p-item" data-act="apply" style="justify-content:center;background:var(--ink);color:#fff;border-radius:6px;margin:2px 8px;">Apply</div>';
+        '<button type="button" class="tf-popup-apply" style="width:calc(100% - 16px);margin:2px 8px 6px;">Apply</button>';
       const div = openPopover(anchor, html);
-      div.querySelector('[data-act="apply"]').addEventListener('click', ()=>{
+      div.querySelector('.tf-popup-apply').addEventListener('click', ()=>{
         const minEl = div.querySelector('#rfMin'), maxEl = div.querySelector('#rfMax');
         const opts = {};
         if(minEl.value!=='') opts.min = parseFloat(minEl.value);
         if(maxEl.value!=='') opts.max = parseFloat(maxEl.value);
-        currentWorksheet.applyRangeFilterAsync(filter.fieldName, opts).then(refreshTableauFilters).catch(err=>{ console.warn('applyRangeFilterAsync failed:', err); });
-        closePopover();
+        currentWorksheet.applyRangeFilterAsync(filter.fieldName, opts).then(()=>{ closePopover(); refreshTableauFilters(); }).catch(err=>{ console.warn('applyRangeFilterAsync failed:', err); });
       });
     } else {
       openPopover(anchor, '<div class="p-title">'+escapeHtml(stripWrapper(filter.fieldName).bare)+'</div><div style="padding:8px;font-size:11.5px;color:var(--ink-soft);max-width:220px;">This filter type isn\'t editable here yet — change it in Tableau\'s Filters shelf.</div>');
