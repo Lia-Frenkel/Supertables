@@ -59,13 +59,14 @@
   .spacer{flex:1;}
   .sel-count{font-size:11.5px;color:var(--ink-soft);margin-right:2px;}
 
-  .topfilters{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--line);flex-wrap:wrap;}
-  .tf-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;color:var(--ink-faint);margin-right:2px;}
-  .tf-btn{font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:5px 11px;cursor:pointer;color:var(--ink-soft);}
-  .tf-btn:hover{border-color:var(--line-strong);}
-  .tf-btn.tf-active{background:var(--accent-soft);border-color:var(--accent-soft-strong);color:var(--accent-ink);}
-  .tf-caret{font-size:9px;opacity:.7;margin-left:2px;}
-  .tf-reset{margin-left:auto;font-size:11.5px;font-weight:600;color:var(--accent-ink);background:none;border:none;cursor:pointer;text-decoration:underline;padding:4px 2px;}
+  .topfilters{position:relative;padding:14px 130px 14px 14px;border-top:1px solid var(--line);}
+  .tf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 10px;}
+  .tf-btn{display:flex;align-items:center;justify-content:space-between;gap:6px;height:30px;font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:0 8px 0 10px;cursor:pointer;color:var(--ink);width:100%;box-sizing:border-box;}
+  .tf-btn span.tf-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tf-btn:hover{border-color:var(--line-strong);background:#FAFAFC;}
+  .tf-btn.tf-active{border-color:var(--accent-soft-strong);color:var(--accent-ink);font-weight:600;}
+  .tf-caret{font-size:9px;opacity:.6;flex:none;color:var(--ink-faint);}
+  .tf-reset{position:absolute;top:16px;right:14px;font-size:11.5px;font-weight:600;color:var(--accent-ink);background:none;border:none;cursor:pointer;text-decoration:underline;padding:2px;}
   .tf-reset:hover{color:var(--accent);}
 
   .pipeline{background:var(--pivot-head);color:var(--ink-soft);font-size:11px;padding:8px 12px;display:flex;align-items:center;flex-wrap:wrap;border-radius:0 0 var(--radius) var(--radius);overflow-x:auto;border-top:1px solid var(--line);}
@@ -14273,6 +14274,8 @@ window.tableau = __webpack_exports__;
   let CURRENCY_SYMBOL = '$';
   let SHOW_LAST_N_PERIODS = 14;
   let FILTERS_ORDER = [];
+  let FILTERS_HIDDEN = [];
+  let SHOW_PERIOD_BY_DEFAULT = false;
   let DEFAULT_WEEK_START = 'mon';
   let DEFAULT_TIMEFRAME = null; // null = auto-pick by data span, as before
 
@@ -14429,7 +14432,7 @@ window.tableau = __webpack_exports__;
 
   function defaultState(){
     return {
-      groupBy: new Set(DIM_ORDER.filter(d=>d!=='__period')),
+      groupBy: new Set(SHOW_PERIOD_BY_DEFAULT ? DIM_ORDER.slice() : DIM_ORDER.filter(d=>d!=='__period')),
       valueColumns: DEFAULT_VALUE_COLUMNS.map(c=>({...c})),
       columnOrder: DIM_ORDER.concat(DEFAULT_VALUE_COLUMNS.map(c=>c.id)),
       colWidths: {},
@@ -15495,7 +15498,9 @@ window.tableau = __webpack_exports__;
       weekStart: DEFAULT_WEEK_START,
       defaultTimeframe: DEFAULT_TIMEFRAME,
       showLastNPeriods: SHOW_LAST_N_PERIODS,
-      filtersOrder: FILTERS_ORDER
+      filtersOrder: FILTERS_ORDER,
+      filtersHidden: FILTERS_HIDDEN,
+      showPeriodByDefault: SHOW_PERIOD_BY_DEFAULT
     };
     tableau.extensions.settings.set('supertableDefaults', JSON.stringify(payload));
     tableau.extensions.settings.saveAsync().then(()=> showToast('Saved as default for all viewers'));
@@ -15532,8 +15537,13 @@ window.tableau = __webpack_exports__;
   }
   function fmtFilterVal(dv){ if(!dv) return '—'; return (dv.formattedValue!=null && dv.formattedValue!=='') ? dv.formattedValue : String(dv.value); }
   function orderedTableauFilters(){
-    if(!FILTERS_ORDER.length) return tableauFiltersCache;
-    return [...tableauFiltersCache].sort((a,b)=>{
+    let list = tableauFiltersCache;
+    if(FILTERS_HIDDEN.length){
+      const hiddenSet = new Set(FILTERS_HIDDEN);
+      list = list.filter(f=> !hiddenSet.has(stripWrapper(f.fieldName).bare));
+    }
+    if(!FILTERS_ORDER.length) return list;
+    return [...list].sort((a,b)=>{
       const ai = FILTERS_ORDER.indexOf(stripWrapper(a.fieldName).bare);
       const bi = FILTERS_ORDER.indexOf(stripWrapper(b.fieldName).bare);
       return (ai===-1?999:ai) - (bi===-1?999:bi);
@@ -15542,15 +15552,16 @@ window.tableau = __webpack_exports__;
   function renderTableauFiltersBar(){
     const el = document.getElementById('tableauFilters');
     const ordered = orderedTableauFilters();
-    const pills = ordered.map(f=>{
-      let summary = '';
-      if(f.filterType==='categorical') summary = f.isAllSelected ? 'All' : (f.appliedValues.length+' selected');
-      else if(f.filterType==='range') summary = fmtFilterVal(f.minValue)+' – '+fmtFilterVal(f.maxValue);
-      else if(f.filterType==='relativeDate') summary = 'relative date';
-      else summary = 'hierarchical';
-      return '<button class="tf-btn" data-name="'+escapeAttr(f.fieldName)+'">'+escapeHtml(stripWrapper(f.fieldName).bare)+': '+escapeHtml(summary)+'<span class="tf-caret">▾</span></button>';
+    const buttons = ordered.map(f=>{
+      let summary = '', isActive = false;
+      if(f.filterType==='categorical'){ isActive = !f.isAllSelected; summary = f.isAllSelected ? 'All' : (f.appliedValues.length+' selected'); }
+      else if(f.filterType==='range'){ isActive = true; summary = fmtFilterVal(f.minValue)+' – '+fmtFilterVal(f.maxValue); }
+      else if(f.filterType==='relativeDate'){ isActive = true; summary = 'relative date'; }
+      else { isActive = true; summary = 'hierarchical'; }
+      const bare = stripWrapper(f.fieldName).bare;
+      return '<button class="tf-btn'+(isActive?' tf-active':'')+'" data-name="'+escapeAttr(f.fieldName)+'" title="'+escapeAttr(bare+': '+summary)+'"><span class="tf-name">'+escapeHtml(bare)+'</span><span class="tf-caret">▾</span></button>';
     }).join('');
-    el.innerHTML = '<span class="tf-label">Filters</span>' + pills +
+    el.innerHTML = '<div class="tf-grid">'+buttons+'</div>'+
       '<button class="tf-reset" id="btnResetAllFilters">Reset All Filters</button>';
     el.querySelectorAll('.tf-btn').forEach(btn=>{
       btn.addEventListener('click', ()=> openTableauFilterPopover(btn, tableauFiltersCache.find(f=>f.fieldName===btn.getAttribute('data-name'))));
@@ -15635,6 +15646,8 @@ window.tableau = __webpack_exports__;
         if(savedGeneral.weekStart) DEFAULT_WEEK_START = savedGeneral.weekStart;
         if(savedGeneral.defaultTimeframe) DEFAULT_TIMEFRAME = savedGeneral.defaultTimeframe;
         if(Array.isArray(savedGeneral.filtersOrder)) FILTERS_ORDER = savedGeneral.filtersOrder;
+        if(Array.isArray(savedGeneral.filtersHidden)) FILTERS_HIDDEN = savedGeneral.filtersHidden;
+        SHOW_PERIOD_BY_DEFAULT = !!savedGeneral.showPeriodByDefault;
       }
 
       const dataTable = await fetchWorksheetData(currentWorksheet);
@@ -15752,8 +15765,10 @@ window.tableau = __webpack_exports__;
       availableFieldNames: DEFAULT_VALUE_COLUMNS.map(c=>c.label),
       availableFilterFields: TOPFILTER_DIMS.map(id=>DIM_META[id].label),
       filtersOrder: FILTERS_ORDER,
+      filtersHidden: FILTERS_HIDDEN,
       timeframeOptions: TIMEFRAME_OPTIONS,
-      generalSettings: {currencySymbol:CURRENCY_SYMBOL, weekStart:DEFAULT_WEEK_START, defaultTimeframe:DEFAULT_TIMEFRAME||'', showLastNPeriods:SHOW_LAST_N_PERIODS},
+      hasDateField: !!DATE_FIELD_ID,
+      generalSettings: {currencySymbol:CURRENCY_SYMBOL, weekStart:DEFAULT_WEEK_START, defaultTimeframe:DEFAULT_TIMEFRAME||'', showLastNPeriods:SHOW_LAST_N_PERIODS, showPeriodByDefault:SHOW_PERIOD_BY_DEFAULT},
       fields: fields
     });
     const popupUrl = location.origin + location.pathname + '?dialog=configure';
@@ -15768,14 +15783,20 @@ window.tableau = __webpack_exports__;
         if(gs.showLastNPeriods) SHOW_LAST_N_PERIODS = gs.showLastNPeriods;
         DEFAULT_TIMEFRAME = gs.defaultTimeframe || null;
         DEFAULT_WEEK_START = gs.weekStart || 'mon';
+        const periodDefaultChanged = SHOW_PERIOD_BY_DEFAULT !== !!gs.showPeriodByDefault;
+        SHOW_PERIOD_BY_DEFAULT = !!gs.showPeriodByDefault;
         if(state && state.dateRange && gs.weekStart){
           state.dateRange.weekStart = gs.weekStart;
           if(state.dateRange.timeframe==='weekly'){
             state.dateRange.start = clampStartToData(computeStartForPeriodsBack('weekly', state.dateRange.end, SHOW_LAST_N_PERIODS));
           }
         }
+        if(periodDefaultChanged && state && DATE_FIELD_ID){
+          if(SHOW_PERIOD_BY_DEFAULT) state.groupBy.add('__period'); else state.groupBy.delete('__period');
+        }
       }
       if(Array.isArray(result.filtersOrder)) FILTERS_ORDER = result.filtersOrder;
+      if(Array.isArray(result.filtersHidden)) FILTERS_HIDDEN = result.filtersHidden;
 
       if(result.fieldRoles && fields.length){
         fieldRoleOverrides = result.fieldRoles;
@@ -15838,10 +15859,12 @@ window.tableau = __webpack_exports__;
     const fieldRows = initial.fields || [];
     const timeframeOptions = initial.timeframeOptions || [];
     const gs = initial.generalSettings || {};
+    const hasDateField = !!initial.hasDateField;
     const rows = (initial.formulas || []).map(f=>({name:f.name||'', expr:f.expr||'', format:f.format||'number', decimals: f.decimals!=null?f.decimals:2, thousands: f.thousands!==false}));
     const allFilterFields = initial.availableFilterFields || [];
-    let filterOrderList = (initial.filtersOrder||[]).filter(n=>allFilterFields.includes(n));
-    allFilterFields.forEach(n=>{ if(!filterOrderList.includes(n)) filterOrderList.push(n); });
+    const hiddenSet = new Set(initial.filtersHidden||[]);
+    let filterOrderList = (initial.filtersOrder||[]).filter(n=>allFilterFields.includes(n)).map(n=>({name:n, visible:!hiddenSet.has(n)}));
+    allFilterFields.forEach(n=>{ if(!filterOrderList.some(r=>r.name===n)) filterOrderList.push({name:n, visible:!hiddenSet.has(n)}); });
     const root = document.getElementById('cfgDialogRoot');
     const FORMAT_LABEL = {currency:'Currency', percent:'Percent', number:'Number'};
 
@@ -15881,14 +15904,26 @@ window.tableau = __webpack_exports__;
       if(!r.expr){ errEl.textContent=''; return; }
       errEl.textContent = validateExprSyntax(r.expr, availableNames) ? '' : 'Check field references and syntax';
     }
-    function filterOrderRowHtml(name){
-      return '<div class="cfg-order-row" draggable="true" data-name="'+escapeAttr(name)+'" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #E6E6EE;border-radius:8px;margin-bottom:5px;background:#fff;cursor:grab;font-size:12.5px;">'+
-        '<span style="color:#C9C7E8;font-size:12px;">\u28FE</span><span>'+escapeHtml(name)+'</span></div>';
+    function filterOrderRowHtml(row){
+      return '<div class="cfg-order-row" draggable="true" data-name="'+escapeAttr(row.name)+'" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #E6E6EE;border-radius:8px;margin-bottom:5px;background:#fff;cursor:grab;font-size:12.5px;">'+
+        '<span style="color:#C9C7E8;font-size:12px;">\u28FE</span>'+
+        '<label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;" onclick="event.stopPropagation()">'+
+          '<input type="checkbox" class="cfg-order-visible" data-name="'+escapeAttr(row.name)+'" '+(row.visible?'checked':'')+'>'+
+          '<span style="'+(row.visible?'':'color:#9094AD;text-decoration:line-through;')+'">'+escapeHtml(row.name)+'</span>'+
+        '</label>'+
+      '</div>';
     }
     function renderFilterOrderList(){
       const listEl = document.getElementById('cfgFilterOrderList');
       if(!listEl) return;
-      listEl.innerHTML = filterOrderList.map(n=>filterOrderRowHtml(n)).join('') || '<p style="font-size:12px;color:#9094AD;">No filter fields detected yet.</p>';
+      listEl.innerHTML = filterOrderList.map(row=>filterOrderRowHtml(row)).join('') || '<p style="font-size:12px;color:#9094AD;">No filter fields detected yet.</p>';
+      listEl.querySelectorAll('.cfg-order-visible').forEach(cb=>{
+        cb.addEventListener('change', ()=>{
+          const row = filterOrderList.find(r=>r.name===cb.getAttribute('data-name'));
+          if(row) row.visible = cb.checked;
+          renderFilterOrderList();
+        });
+      });
       listEl.querySelectorAll('.cfg-order-row').forEach(row=>{
         row.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', row.getAttribute('data-name')); });
         row.addEventListener('dragover', e=>{ e.preventDefault(); row.style.borderColor='#5B4EE8'; });
@@ -15898,11 +15933,11 @@ window.tableau = __webpack_exports__;
           const draggedName = e.dataTransfer.getData('text/plain');
           const targetName = row.getAttribute('data-name');
           if(draggedName===targetName) return;
-          const fromIdx = filterOrderList.indexOf(draggedName);
+          const fromIdx = filterOrderList.findIndex(r=>r.name===draggedName);
           if(fromIdx===-1) return;
-          filterOrderList.splice(fromIdx,1);
-          const toIdx = filterOrderList.indexOf(targetName);
-          filterOrderList.splice(toIdx,0,draggedName);
+          const [draggedRow] = filterOrderList.splice(fromIdx,1);
+          const toIdx = filterOrderList.findIndex(r=>r.name===targetName);
+          filterOrderList.splice(toIdx===-1?filterOrderList.length:toIdx,0,draggedRow);
           renderFilterOrderList();
         });
       });
@@ -15930,6 +15965,9 @@ window.tableau = __webpack_exports__;
               '</select></div>'+
             '<div><label style="display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;margin-bottom:4px;">Show Last N Periods</label>'+
               '<input type="number" id="cfgShowLastN" min="1" max="52" value="'+(gs.showLastNPeriods||14)+'" style="width:64px;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;"></div>'+
+            (hasDateField
+              ? '<div style="display:flex;align-items:flex-end;padding-bottom:8px;"><label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:#1F2152;cursor:pointer;"><input type="checkbox" id="cfgShowPeriod" '+(gs.showPeriodByDefault?'checked':'')+'> Show date dimension by default</label></div>'
+              : '')+
           '</div>'+
 
           '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Field Roles</h3>'+
@@ -15998,15 +16036,19 @@ window.tableau = __webpack_exports__;
           const sel = document.getElementById('cfgRole'+i);
           if(sel) fieldRoles[sel.getAttribute('data-field')] = sel.value;
         });
+        const showPeriodEl = document.getElementById('cfgShowPeriod');
         const generalSettings = {
           currencySymbol: (document.getElementById('cfgCurrency').value.trim() || '$'),
           weekStart: document.getElementById('cfgWeekStart').value,
           defaultTimeframe: document.getElementById('cfgDefaultTf').value,
-          showLastNPeriods: parseInt(document.getElementById('cfgShowLastN').value,10) || 14
+          showLastNPeriods: parseInt(document.getElementById('cfgShowLastN').value,10) || 14,
+          showPeriodByDefault: showPeriodEl ? showPeriodEl.checked : false
         };
         tableau.extensions.ui.closeDialog(JSON.stringify({
           cancelled:false, formulas:clean, fieldRoles:fieldRoles,
-          generalSettings: generalSettings, filtersOrder: filterOrderList
+          generalSettings: generalSettings,
+          filtersOrder: filterOrderList.map(r=>r.name),
+          filtersHidden: filterOrderList.filter(r=>!r.visible).map(r=>r.name)
         }));
       });
     }
