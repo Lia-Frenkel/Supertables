@@ -102,7 +102,9 @@
   .th-menu-btn:hover{background:var(--line);color:var(--ink);}
   .resizer{position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize;}
   .resizer:hover, .resizer.active{background:var(--accent-soft-strong);}
-  th.dragover .th-inner{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent);}
+  th.dragging-source .th-inner{background:var(--accent-soft);}
+  th.dragging-source .th-label{color:var(--accent-ink);font-weight:700;}
+  th.dragging-source .th-grip{color:var(--accent);}
   .pin-edge-left{box-shadow:2px 0 4px rgba(31,33,82,.10);}
   .pin-edge-right{box-shadow:-2px 0 4px rgba(31,33,82,.10);}
 
@@ -14645,14 +14647,14 @@ window.tableau = __webpack_exports__;
     if(!o) return '';
     return 'position:sticky;'+o.side+':'+o.px+'px;z-index:'+(extra||3)+';';
   }
-  function reorderColumn(draggedId, targetId){
-    if(draggedId===targetId) return;
+  function reorderColumnBefore(draggedId, insertBeforeId){
     const order = state.columnOrder;
     const fromIdx = order.indexOf(draggedId);
     if(fromIdx===-1) return;
     order.splice(fromIdx,1);
-    const toIdx = order.indexOf(targetId);
-    if(toIdx===-1){ order.splice(fromIdx,0,draggedId); return; }
+    if(insertBeforeId==null){ order.push(draggedId); return; }
+    const toIdx = order.indexOf(insertBeforeId);
+    if(toIdx===-1){ order.push(draggedId); return; }
     order.splice(toIdx,0,draggedId);
   }
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
@@ -14860,6 +14862,36 @@ window.tableau = __webpack_exports__;
   /* ============================================================
      6. HEADER EVENTS
   ============================================================ */
+  function ensureDragIndicator(){
+    let el = document.getElementById('dragInsertLine');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'dragInsertLine';
+      el.style.position = 'fixed';
+      el.style.width = '3px';
+      el.style.background = 'var(--accent)';
+      el.style.borderRadius = '2px';
+      el.style.zIndex = '50';
+      el.style.pointerEvents = 'none';
+      el.style.display = 'none';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function showDragIndicator(x){
+    const shell = document.getElementById('tableShell');
+    if(!shell) return;
+    const rect = shell.getBoundingClientRect();
+    const el = ensureDragIndicator();
+    el.style.left = (x-1.5)+'px';
+    el.style.top = rect.top+'px';
+    el.style.height = rect.height+'px';
+    el.style.display = 'block';
+  }
+  function hideDragIndicator(){
+    const el = document.getElementById('dragInsertLine');
+    if(el) el.style.display = 'none';
+  }
   function attachHeaderEvents(){
     const row = document.getElementById('headerRow');
     row.querySelectorAll('th').forEach(th=>{
@@ -14898,30 +14930,42 @@ window.tableau = __webpack_exports__;
         const startX = e.clientX, startY = e.clientY;
         const draggedId = colId;
         let dragging = false;
-        let lastTarget = null;
+        let dropInfo = null;
         function onMove(ev){
           if(!dragging){
             if(Math.abs(ev.clientX-startX)<4 && Math.abs(ev.clientY-startY)<4) return;
             dragging = true;
             document.body.style.userSelect = 'none';
             document.body.style.cursor = 'grabbing';
+            th.classList.add('dragging-source');
           }
           const el = document.elementFromPoint(ev.clientX, ev.clientY);
           const targetTh = el && el.closest('th[data-colid]');
-          const validTarget = (targetTh && targetTh.getAttribute('data-colid')!==draggedId) ? targetTh : null;
-          if(lastTarget && lastTarget!==validTarget) lastTarget.classList.remove('dragover');
-          if(validTarget) validTarget.classList.add('dragover');
-          lastTarget = validTarget;
+          if(!targetTh || targetTh.getAttribute('data-colid')===draggedId){ dropInfo = null; hideDragIndicator(); return; }
+          const rect = targetTh.getBoundingClientRect();
+          const before = (ev.clientX - rect.left) < rect.width/2;
+          let insertBeforeId, lineX;
+          if(before){
+            insertBeforeId = targetTh.getAttribute('data-colid');
+            lineX = rect.left;
+          } else {
+            const nextTh = targetTh.nextElementSibling;
+            insertBeforeId = (nextTh && nextTh.getAttribute('data-colid')) || null; // null = drop at the very end
+            lineX = rect.right;
+          }
+          dropInfo = {insertBeforeId};
+          showDragIndicator(lineX);
         }
         function onUp(){
           document.removeEventListener('mousemove', onMove);
           document.removeEventListener('mouseup', onUp);
           document.body.style.userSelect = '';
           document.body.style.cursor = '';
+          th.classList.remove('dragging-source');
+          hideDragIndicator();
           if(dragging){
-            if(lastTarget){
-              lastTarget.classList.remove('dragover');
-              reorderColumn(draggedId, lastTarget.getAttribute('data-colid'));
+            if(dropInfo){
+              reorderColumnBefore(draggedId, dropInfo.insertBeforeId);
               render();
             }
           } else {
