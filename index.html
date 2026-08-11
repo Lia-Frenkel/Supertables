@@ -59,12 +59,12 @@
   .spacer{flex:1;}
   .sel-count{font-size:11.5px;color:var(--ink-soft);margin-right:2px;}
 
-  .topfilters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 20px;padding:12px 16px;border-top:1px solid var(--line);}
+  .topfilters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 20px;padding:12px 16px;border-bottom:1px solid var(--line);}
   .tf-btn{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;min-width:150px;font-size:13px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 10px;cursor:pointer;color:var(--ink);font-family:inherit;}
   .tf-btn span.tf-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .tf-btn:hover{background:#FAFAFB;}
   .tf-btn.tf-active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);}
-  .tf-caret{font-size:10px;flex:none;color:var(--ink-faint);}
+  .tf-caret{display:inline-flex;flex:none;color:var(--ink-faint);}
   .tf-reset{flex:none;margin-left:auto;align-self:flex-end;border:1px solid var(--line);border-radius:8px;background:none;color:var(--accent-ink);font-size:12px;font-weight:600;padding:7px 12px;cursor:pointer;font-family:inherit;white-space:nowrap;}
   .tf-reset:hover{background:var(--accent-soft);}
   .tf-popup-search{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:12px;font-family:inherit;color:var(--ink);outline:none;margin-bottom:6px;}
@@ -102,6 +102,8 @@
   .resizer{position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize;}
   .resizer:hover, .resizer.active{background:var(--accent-soft-strong);}
   th.dragover .th-inner{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent);}
+  .pin-edge-left{box-shadow:2px 0 4px rgba(31,33,82,.10);}
+  .pin-edge-right{box-shadow:-2px 0 4px rgba(31,33,82,.10);}
 
   .filter-row td{background:#fff;padding:4px 7px;}
   .filter-row input[type=text]{width:100%;font-size:11.5px;font-family:inherit;border:1px solid var(--line);border-radius:6px;padding:4px 6px;background:#fff;color:var(--ink);}
@@ -177,6 +179,7 @@
 <div class="app hidden" id="appRoot">
   <div class="card">
     <div class="daterange-bar hidden" id="daterangeBar"></div>
+    <div class="topfilters" id="tableauFilters"></div>
     <div class="toolbar" id="toolbar">
       <div class="search">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -190,10 +193,9 @@
       <div class="spacer"></div>
       <span class="sel-count" id="selCount"></span>
       <button class="btn" id="btnChart">📊 Create Chart</button>
-      <button class="btn" id="btnExportImage">🖼 Export Image</button>
+      <button class="btn accentish" id="btnExportImage">🖼 Export Image</button>
       <button class="btn accentish" id="btnExport">Export CSV ⭳</button>
     </div>
-    <div class="topfilters" id="tableauFilters"></div>
     <div class="pipeline" id="pipeline"></div>
   </div>
 
@@ -14163,6 +14165,11 @@ window.tableau = __webpack_exports__;
         built from whichever date field Tableau gives us)
   ============================================================ */
   const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const CHEVRON_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+  // Used only in *selection* UIs (Columns picker, Pivot config, Chart dimension picker) — the
+  // actual rendered table/chart still shows the timeframe-based label (Day/Week/Month/etc) via
+  // DIM_META[d].label directly, which stays correct precisely because this helper doesn't touch it.
+  function selectorLabel(d){ return d==='__period' ? 'Dynamic Date' : DIM_META[d].label; }
   function pad2(n){ return String(n).padStart(2,'0'); }
   function isoDate(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
   function parseIsoDate(s){ const p=s.split('-').map(Number); return new Date(p[0],p[1]-1,p[2]); }
@@ -14444,6 +14451,7 @@ window.tableau = __webpack_exports__;
       groupBy: new Set(SHOW_PERIOD_BY_DEFAULT ? DIM_ORDER.slice() : DIM_ORDER.filter(d=>d!=='__period')),
       valueColumns: DEFAULT_VALUE_COLUMNS.map(c=>({...c})),
       columnOrder: DIM_ORDER.concat(DEFAULT_VALUE_COLUMNS.map(c=>c.id)),
+      pinned: {},
       colWidths: {},
       filters: {},
       keepOnly: {},
@@ -14596,16 +14604,45 @@ window.tableau = __webpack_exports__;
      4. DISPLAY COLUMNS
   ============================================================ */
   function displayColumns(groupByArr){
-    const cols = [{type:'checkbox', id:'__chk', width:32}];
+    const leftPinned = [], normal = [], rightPinned = [];
     for(const id of state.columnOrder){
+      let col = null;
       if(DIM_META[id]){
-        if(groupByArr.includes(id)) cols.push({type:'dim', id, label:DIM_META[id].label, width:getWidth(id)});
+        if(groupByArr.includes(id)) col = {type:'dim', id, label:DIM_META[id].label, width:getWidth(id)};
       } else {
         const vc = state.valueColumns.find(c=>c.id===id);
-        if(vc && vc.visible) cols.push({type:'value', id:vc.id, label:vc.label, kind:vc.kind, format:vc.format, agg:vc.agg, width:getWidth(vc.id)});
+        if(vc && vc.visible) col = {type:'value', id:vc.id, label:vc.label, kind:vc.kind, format:vc.format, agg:vc.agg, width:getWidth(vc.id)};
       }
+      if(!col) continue;
+      const pin = state.pinned[id];
+      col.pinned = pin || null;
+      if(pin==='left') leftPinned.push(col);
+      else if(pin==='right') rightPinned.push(col);
+      else normal.push(col);
     }
-    return cols;
+    return [{type:'checkbox', id:'__chk', width:32, pinned:'left'}, ...leftPinned, ...normal, ...rightPinned];
+  }
+  // Sticky left/right pixel offsets per pinned column id, for freezing columns during
+  // horizontal scroll. Checkbox always counts as the first left-pinned column.
+  function computeStickyOffsets(cols){
+    const offsets = {};
+    let leftAcc = 0;
+    for(const c of cols){
+      if(c.type==='checkbox' || c.pinned==='left'){ offsets[c.id] = {side:'left', px:leftAcc}; leftAcc += c.width; }
+      else break;
+    }
+    let rightAcc = 0;
+    for(let i=cols.length-1;i>=0;i--){
+      const c = cols[i];
+      if(c.pinned==='right'){ offsets[c.id] = {side:'right', px:rightAcc}; rightAcc += c.width; }
+      else break;
+    }
+    return offsets;
+  }
+  function stickyStyleFor(offsets, colId, extra){
+    const o = offsets[colId];
+    if(!o) return '';
+    return 'position:sticky;'+o.side+':'+o.px+'px;z-index:'+(extra||3)+';';
   }
   function reorderColumn(draggedId, targetId){
     if(draggedId===targetId) return;
@@ -14633,13 +14670,14 @@ window.tableau = __webpack_exports__;
 
     const {groupByArr, rows, total} = computePipeline();
     const cols = displayColumns(groupByArr);
+    const offsets = computeStickyOffsets(cols);
 
     renderPipelineStrip(groupByArr);
     renderColgroup(cols);
-    renderHeader(cols);
-    renderFilterRow(cols);
-    renderBody(cols, rows);
-    renderFooter(cols, total, rows.length);
+    renderHeader(cols, offsets);
+    renderFilterRow(cols, offsets);
+    renderBody(cols, rows, offsets);
+    renderFooter(cols, total, rows.length, offsets);
     renderToolbarState(rows.length);
   }
 
@@ -14702,18 +14740,35 @@ window.tableau = __webpack_exports__;
 
   function renderColgroup(cols){ document.getElementById('colgroup').innerHTML = cols.map(c=>'<col style="width:'+c.width+'px" data-colid="'+c.id+'">').join(''); }
 
-  function renderHeader(cols){
+  function pinEdgeClass(cols, idx){
+    const c = cols[idx];
+    const isLeftPin = c.type==='checkbox' || c.pinned==='left';
+    const isRightPin = c.pinned==='right';
+    if(isLeftPin){
+      const next = cols[idx+1];
+      if(!next || !(next.type==='checkbox' || next.pinned==='left')) return 'pin-edge-left';
+    }
+    if(isRightPin){
+      const prev = cols[idx-1];
+      if(!prev || prev.pinned!=='right') return 'pin-edge-right';
+    }
+    return '';
+  }
+  function renderHeader(cols, offsets){
     const row = document.getElementById('headerRow');
-    row.innerHTML = cols.map(c=>{
+    row.innerHTML = cols.map((c,i)=>{
+      const stickyStyle = stickyStyleFor(offsets, c.id, 4);
+      const edgeClass = pinEdgeClass(cols, i);
+      const attrs = (stickyStyle?' style="'+stickyStyle+'"':'')+(edgeClass?' class="'+edgeClass+'"':'');
       if(c.type==='checkbox'){
         const keys = getVisibleRowKeys();
         const allSelected = keys.length>0 && keys.every(k=>state.selected.has(k));
-        return '<th><div class="th-inner chk-head"><input type="checkbox" id="selectAll" '+(allSelected?'checked':'')+'></div></th>';
+        return '<th'+attrs+'><div class="th-inner chk-head"><input type="checkbox" id="selectAll" '+(allSelected?'checked':'')+'></div></th>';
       }
       const sortDir = state.sort.colId===c.id ? state.sort.dir : 0;
       const arrow = sortDir===1?'\u2191':sortDir===-1?'\u2193':'';
       const aggBadge = c.type==='value' ? c.agg : '';
-      return '<th draggable="true" data-colid="'+c.id+'" data-coltype="'+c.type+'">'+
+      return '<th data-colid="'+c.id+'" data-coltype="'+c.type+'"'+attrs+'>'+
         '<div class="th-inner">'+
           '<div class="th-label-wrap" data-role="sort">'+
             '<span class="th-grip" title="Drag to reorder">\u28FE</span>'+
@@ -14721,25 +14776,28 @@ window.tableau = __webpack_exports__;
             (aggBadge?'<span class="th-agg">'+aggBadge+'</span>':'')+
             (arrow?'<span class="th-sort">'+arrow+'</span>':'')+
           '</div>'+
-          '<button class="th-menu-btn" draggable="false" data-role="menu" title="Column menu">\u22EE</button>'+
-          '<div class="resizer" draggable="false" data-role="resize"></div>'+
+          '<button class="th-menu-btn" data-role="menu" title="Column menu">\u22EE</button>'+
+          '<div class="resizer" data-role="resize"></div>'+
         '</div>'+
       '</th>';
     }).join('');
     attachHeaderEvents();
   }
 
-  function renderFilterRow(cols){
+  function renderFilterRow(cols, offsets){
     const row = document.getElementById('filterRow');
-    row.innerHTML = cols.map(c=>{
-      if(c.type==='checkbox') return '<td></td>';
+    row.innerHTML = cols.map((c,i)=>{
+      const stickyStyle = stickyStyleFor(offsets, c.id, 2);
+      const edgeClass = pinEdgeClass(cols, i);
+      const attrs = (stickyStyle?' style="'+stickyStyle+'background:#fff;"':'')+(edgeClass?' class="'+edgeClass+'"':'');
+      if(c.type==='checkbox') return '<td'+attrs+'></td>';
       if(c.type==='dim'){
         const f = state.filters[c.id];
-        return '<td><input type="text" class="dim-filter'+(f&&f.text?' filter-active':'')+'" data-colid="'+c.id+'" placeholder="Filter…" value="'+escapeAttr(f&&f.text||'')+'"></td>';
+        return '<td'+attrs+'><input type="text" class="dim-filter'+(f&&f.text?' filter-active':'')+'" data-colid="'+c.id+'" placeholder="Filter…" value="'+escapeAttr(f&&f.text||'')+'"></td>';
       }
       const f = state.filters[c.id] || {};
       const active = f.op && f.val!==''&&f.val!==undefined;
-      return '<td><div class="measure-filter'+(active?' filter-active':'')+'">'+
+      return '<td'+attrs+'><div class="measure-filter'+(active?' filter-active':'')+'">'+
         '<select class="measure-op" data-colid="'+c.id+'">'+
           ['','eq','gt','gte','lt','lte'].map(op=>'<option value="'+op+'" '+(f.op===op?'selected':'')+'>'+(op===''?'\u2014':({eq:'=',gt:'>',gte:'\u2265',lt:'<',lte:'\u2264'}[op]))+'</option>').join('')+
         '</select>'+
@@ -14754,7 +14812,7 @@ window.tableau = __webpack_exports__;
   }
   function dimCellText(c, r){ return c.id==='__period' ? r.periodLabel : r[c.id]; }
 
-  function renderBody(cols, rows){
+  function renderBody(cols, rows, offsets){
     const tbody = document.getElementById('tbody');
     if(rows.length===0){
       tbody.innerHTML = '<tr><td colspan="'+cols.length+'"><div class="empty-state"><b>No results match your filters</b>Try widening the date range, clearing filters, or adjusting Group By.</div></td></tr>';
@@ -14765,26 +14823,31 @@ window.tableau = __webpack_exports__;
       const key = rowKey(r, groupByArr);
       const selected = state.selected.has(key);
       return '<tr data-key="'+escapeAttr(key)+'" class="'+(selected?'selected':'')+'">'+
-        cols.map(c=>{
-          if(c.type==='checkbox') return '<td class="chk-cell"><input type="checkbox" class="row-chk" data-key="'+escapeAttr(key)+'" '+(selected?'checked':'')+'></td>';
+        cols.map((c,i)=>{
+          const stickyStyle = stickyStyleFor(offsets, c.id, 2);
+          const edgeClass = pinEdgeClass(cols, i);
+          if(c.type==='checkbox') return '<td class="chk-cell'+(edgeClass?' '+edgeClass:'')+'"'+(stickyStyle?' style="'+stickyStyle+'background:'+(selected?'var(--accent-soft)':'#fff')+';"':'')+'><input type="checkbox" class="row-chk" data-key="'+escapeAttr(key)+'" '+(selected?'checked':'')+'></td>';
           if(c.type==='dim'){
             const text = dimCellText(c,r);
-            return '<td class="dimcell" data-colid="'+c.id+'" data-value="'+escapeAttr(text)+'" title="'+escapeAttr(text)+'">'+escapeHtml(text)+'</td>';
+            return '<td class="dimcell'+(edgeClass?' '+edgeClass:'')+'" data-colid="'+c.id+'" data-value="'+escapeAttr(text)+'" title="'+escapeAttr(text)+'"'+(stickyStyle?' style="'+stickyStyle+'background:'+(selected?'var(--accent-soft)':'#fff')+';"':'')+'>'+escapeHtml(text)+'</td>';
           }
-          return '<td class="num" data-colid="'+c.id+'">'+renderValueCell(c,r[c.id])+'</td>';
+          return '<td class="num'+(edgeClass?' '+edgeClass:'')+'" data-colid="'+c.id+'"'+(stickyStyle?' style="'+stickyStyle+'background:'+(selected?'var(--accent-soft)':'#fff')+';"':'')+'>'+renderValueCell(c,r[c.id])+'</td>';
         }).join('')+
       '</tr>';
     }).join('');
     attachBodyEvents();
   }
 
-  function renderFooter(cols, total, rowCount){
+  function renderFooter(cols, total, rowCount, offsets){
     const tfoot = document.getElementById('tfoot');
     if(rowCount===0){ tfoot.innerHTML=''; return; }
     tfoot.innerHTML = '<tr>'+cols.map((c,i)=>{
-      if(c.type==='checkbox') return '<td></td>';
-      if(c.type==='dim') return '<td class="dimcell">'+(i===1?'TOTAL':'')+'</td>';
-      return '<td class="num">'+renderValueCell(c,total[c.id])+'</td>';
+      const stickyStyle = stickyStyleFor(offsets, c.id, 2);
+      const edgeClass = pinEdgeClass(cols, i);
+      const styleAttr = stickyStyle ? ' style="'+stickyStyle+'background:var(--pivot-head);"' : '';
+      if(c.type==='checkbox') return '<td'+styleAttr+(edgeClass?' class="'+edgeClass+'"':'')+'></td>';
+      if(c.type==='dim') return '<td'+styleAttr+' class="dimcell'+(edgeClass?' '+edgeClass:'')+'">'+(i===1?'TOTAL':'')+'</td>';
+      return '<td'+styleAttr+' class="num'+(edgeClass?' '+edgeClass:'')+'">'+renderValueCell(c,total[c.id])+'</td>';
     }).join('')+'</tr>';
   }
 
@@ -14831,10 +14894,35 @@ window.tableau = __webpack_exports__;
       });
       resizer.addEventListener('dblclick', e=>{ e.stopPropagation(); resetColWidth(colId); render(); });
       th.querySelector('[data-role="menu"]').addEventListener('click', e=>{ e.stopPropagation(); openColumnMenu(e.currentTarget, colId); });
-      th.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', colId); });
-      th.addEventListener('dragover', e=>{ e.preventDefault(); th.classList.add('dragover'); });
-      th.addEventListener('dragleave', ()=> th.classList.remove('dragover'));
-      th.addEventListener('drop', e=>{ e.preventDefault(); th.classList.remove('dragover'); reorderColumn(e.dataTransfer.getData('text/plain'), colId); render(); });
+      const grip = th.querySelector('.th-grip');
+      if(grip) grip.addEventListener('mousedown', e=>{
+        e.preventDefault(); e.stopPropagation();
+        const draggedId = colId;
+        let lastTarget = null;
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'grabbing';
+        function onMove(ev){
+          const el = document.elementFromPoint(ev.clientX, ev.clientY);
+          const targetTh = el && el.closest('th[data-colid]');
+          const validTarget = (targetTh && targetTh.getAttribute('data-colid')!==draggedId) ? targetTh : null;
+          if(lastTarget && lastTarget!==validTarget) lastTarget.classList.remove('dragover');
+          if(validTarget) validTarget.classList.add('dragover');
+          lastTarget = validTarget;
+        }
+        function onUp(){
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+          document.body.style.userSelect = '';
+          document.body.style.cursor = '';
+          if(lastTarget){
+            lastTarget.classList.remove('dragover');
+            reorderColumn(draggedId, lastTarget.getAttribute('data-colid'));
+            render();
+          }
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
     });
   }
 
@@ -14865,9 +14953,10 @@ window.tableau = __webpack_exports__;
   function renderBodyOnly(){
     const {groupByArr, rows, total} = computePipeline();
     const cols = displayColumns(groupByArr);
+    const offsets = computeStickyOffsets(cols);
     renderPipelineStrip(groupByArr);
-    renderBody(cols, rows);
-    renderFooter(cols, total, rows.length);
+    renderBody(cols, rows, offsets);
+    renderFooter(cols, total, rows.length, offsets);
     renderToolbarState(rows.length);
   }
 
@@ -14924,7 +15013,7 @@ window.tableau = __webpack_exports__;
 
   document.getElementById('btnColumns').addEventListener('click', function(){
     const html = '<div class="p-title">Dimensions</div>'+
-      DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(state.groupBy.has(d)?'checked':'')+'> '+escapeHtml(DIM_META[d].label)+'</label>').join('')+
+      DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(state.groupBy.has(d)?'checked':'')+'> '+escapeHtml(selectorLabel(d))+'</label>').join('')+
       '<div class="p-title">Measures</div>'+
       state.valueColumns.map(c=>'<label><input type="checkbox" data-role="colval" data-col="'+c.id+'" '+(c.visible?'checked':'')+'> '+escapeHtml(c.label)+(c.kind!=='measure'?' <span style="color:var(--ink-faint);font-size:10px;">('+c.kind+')</span>':'')+'</label>').join('');
     const div = openPopover(this, html);
@@ -14947,6 +15036,11 @@ window.tableau = __webpack_exports__;
     let items = [ item('sortAsc','Sort Ascending'), item('sortDesc','Sort Descending') ];
     if(!isDim) items.push(item('hide','Hide Column'));
     items.push(item('autosize','Auto Size Column'));
+    items.push('<hr>');
+    const currentPin = state.pinned[colId];
+    if(currentPin!=='left') items.push(item('pinLeft','\uD83D\uDCCC Pin Left'));
+    if(currentPin!=='right') items.push(item('pinRight','\uD83D\uDCCC Pin Right'));
+    if(currentPin) items.push(item('unpin','Unpin Column'));
     if(!isDim){
       const col = state.valueColumns.find(c=>c.id===colId);
       if(col && col.kind==='formula') items.push('<hr>', item('editFormula','Edit Formula'), item('deleteFormula','Remove Formula','danger'));
@@ -14959,6 +15053,9 @@ window.tableau = __webpack_exports__;
         if(action==='sortDesc') state.sort={colId,dir:-1};
         if(action==='hide'){ const c=state.valueColumns.find(c=>c.id===colId); if(c) c.visible=false; }
         if(action==='autosize') resetColWidth(colId);
+        if(action==='pinLeft') state.pinned[colId] = 'left';
+        if(action==='pinRight') state.pinned[colId] = 'right';
+        if(action==='unpin') delete state.pinned[colId];
         if(action==='editFormula'){
           const f = state.formulas.find(f=>f.id===colId);
           closePopover();
@@ -15188,7 +15285,7 @@ window.tableau = __webpack_exports__;
             ['bar','line','pie','scatter'].map(t=>'<option value="'+t+'" '+(t===defaultType?'selected':'')+'>'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>').join('')+
           '</select></div>'+
           '<div style="flex:1;" id="chartDimWrap"><label>Dimension</label><select id="chartDim">'+
-            dimOptions.map(d=>'<option value="'+d+'" '+(d===defaultDim?'selected':'')+'>'+DIM_META[d].label+'</option>').join('')+
+            dimOptions.map(d=>'<option value="'+d+'" '+(d===defaultDim?'selected':'')+'>'+escapeHtml(selectorLabel(d))+'</option>').join('')+
           '</select></div>'+
         '</div>'+
         '<div id="chartMeasureWrap"><label>Measure</label><select id="chartMeasure">'+
@@ -15250,11 +15347,11 @@ window.tableau = __webpack_exports__;
       '<div style="display:flex;gap:4px;">'+
         '<div style="flex:1;min-width:0;">'+
           '<div class="p-title">Row Grouping</div>'+
-          DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="rowdim" data-dim="'+d+'" '+(p.rowDims.includes(d)?'checked':'')+'> '+escapeHtml(DIM_META[d].label)+'</label>').join('')+
+          DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="rowdim" data-dim="'+d+'" '+(p.rowDims.includes(d)?'checked':'')+'> '+escapeHtml(selectorLabel(d))+'</label>').join('')+
         '</div>'+
         '<div style="flex:1;min-width:0;">'+
           '<div class="p-title">Column Grouping</div>'+
-          DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(p.colDims.includes(d)?'checked':'')+'> '+escapeHtml(DIM_META[d].label)+'</label>').join('')+
+          DIM_ORDER.map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(p.colDims.includes(d)?'checked':'')+'> '+escapeHtml(selectorLabel(d))+'</label>').join('')+
         '</div>'+
         '<div style="flex:1;min-width:0;">'+
           '<div class="p-title">Selected Values</div>'+
@@ -15572,7 +15669,7 @@ window.tableau = __webpack_exports__;
         isActive = !f.isAllSelected;
         countSuffix = isActive ? ' ('+f.appliedValues.length+')' : '';
       } else { isActive = true; }
-      return '<button class="tf-btn'+(isActive?' tf-active':'')+'" data-name="'+escapeAttr(f.fieldName)+'"><span class="tf-name">'+escapeHtml(bare+countSuffix)+'</span><span class="tf-caret">▾</span></button>';
+      return '<button class="tf-btn'+(isActive?' tf-active':'')+'" data-name="'+escapeAttr(f.fieldName)+'"><span class="tf-name">'+escapeHtml(bare+countSuffix)+'</span><span class="tf-caret">'+CHEVRON_SVG+'</span></button>';
     }).join('') +
       '<button class="tf-reset" id="btnResetAllFilters">Reset All Filters</button>';
     el.querySelectorAll('.tf-btn').forEach(btn=>{
