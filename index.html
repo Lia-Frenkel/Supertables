@@ -14864,13 +14864,6 @@ window.tableau = __webpack_exports__;
     row.querySelectorAll('th').forEach(th=>{
       const colId = th.getAttribute('data-colid');
       if(!colId) return;
-      th.querySelector('[data-role="sort"]').addEventListener('click', ()=>{
-        if(state.sort.colId!==colId){ state.sort = {colId, dir:1}; }
-        else if(state.sort.dir===1){ state.sort.dir=-1; }
-        else if(state.sort.dir===-1){ state.sort={colId:null,dir:0}; }
-        else { state.sort={colId,dir:1}; }
-        render();
-      });
       const resizer = th.querySelector('[data-role="resize"]');
       resizer.addEventListener('mousedown', e=>{
         e.preventDefault(); e.stopPropagation();
@@ -14894,14 +14887,24 @@ window.tableau = __webpack_exports__;
       });
       resizer.addEventListener('dblclick', e=>{ e.stopPropagation(); resetColWidth(colId); render(); });
       th.querySelector('[data-role="menu"]').addEventListener('click', e=>{ e.stopPropagation(); openColumnMenu(e.currentTarget, colId); });
-      const grip = th.querySelector('.th-grip');
-      if(grip) grip.addEventListener('mousedown', e=>{
-        e.preventDefault(); e.stopPropagation();
+
+      // Click anywhere on the header to sort; drag anywhere on it (past a small movement
+      // threshold) to reorder — matches "click, drag and drop any header" rather than requiring
+      // a precise grab on the small grip icon, which is a much smaller/less discoverable target.
+      th.addEventListener('mousedown', e=>{
+        if(e.target.closest('[data-role="resize"]') || e.target.closest('[data-role="menu"]')) return;
+        e.preventDefault();
+        const startX = e.clientX, startY = e.clientY;
         const draggedId = colId;
+        let dragging = false;
         let lastTarget = null;
-        document.body.style.userSelect = 'none';
-        document.body.style.cursor = 'grabbing';
         function onMove(ev){
+          if(!dragging){
+            if(Math.abs(ev.clientX-startX)<4 && Math.abs(ev.clientY-startY)<4) return;
+            dragging = true;
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'grabbing';
+          }
           const el = document.elementFromPoint(ev.clientX, ev.clientY);
           const targetTh = el && el.closest('th[data-colid]');
           const validTarget = (targetTh && targetTh.getAttribute('data-colid')!==draggedId) ? targetTh : null;
@@ -14914,9 +14917,17 @@ window.tableau = __webpack_exports__;
           document.removeEventListener('mouseup', onUp);
           document.body.style.userSelect = '';
           document.body.style.cursor = '';
-          if(lastTarget){
-            lastTarget.classList.remove('dragover');
-            reorderColumn(draggedId, lastTarget.getAttribute('data-colid'));
+          if(dragging){
+            if(lastTarget){
+              lastTarget.classList.remove('dragover');
+              reorderColumn(draggedId, lastTarget.getAttribute('data-colid'));
+              render();
+            }
+          } else {
+            if(state.sort.colId!==colId){ state.sort = {colId, dir:1}; }
+            else if(state.sort.dir===1){ state.sort.dir=-1; }
+            else if(state.sort.dir===-1){ state.sort={colId:null,dir:0}; }
+            else { state.sort={colId,dir:1}; }
             render();
           }
         }
@@ -15030,12 +15041,27 @@ window.tableau = __webpack_exports__;
     });
   });
 
+  function moveColumnStep(colId, dir){
+    const {groupByArr} = computePipeline();
+    const cols = displayColumns(groupByArr).filter(c=>c.type!=='checkbox');
+    const idx = cols.findIndex(c=>c.id===colId);
+    if(idx===-1) return;
+    const targetIdx = idx+dir;
+    if(targetIdx<0 || targetIdx>=cols.length) return;
+    const targetId = cols[targetIdx].id;
+    const order = state.columnOrder;
+    const a = order.indexOf(colId), b = order.indexOf(targetId);
+    if(a===-1 || b===-1) return;
+    order[a] = targetId; order[b] = colId;
+  }
   function openColumnMenu(anchor, colId){
     const isDim = !!DIM_META[colId];
     function item(action,label,cls){ return '<div class="p-item'+(cls?' '+cls:'')+'" data-action="'+action+'">'+label+'</div>'; }
     let items = [ item('sortAsc','Sort Ascending'), item('sortDesc','Sort Descending') ];
     if(!isDim) items.push(item('hide','Hide Column'));
     items.push(item('autosize','Auto Size Column'));
+    items.push('<hr>');
+    items.push(item('moveLeft','\u2190 Move Left'), item('moveRight','\u2192 Move Right'));
     items.push('<hr>');
     const currentPin = state.pinned[colId];
     if(currentPin!=='left') items.push(item('pinLeft','\uD83D\uDCCC Pin Left'));
@@ -15053,6 +15079,8 @@ window.tableau = __webpack_exports__;
         if(action==='sortDesc') state.sort={colId,dir:-1};
         if(action==='hide'){ const c=state.valueColumns.find(c=>c.id===colId); if(c) c.visible=false; }
         if(action==='autosize') resetColWidth(colId);
+        if(action==='moveLeft') moveColumnStep(colId, -1);
+        if(action==='moveRight') moveColumnStep(colId, 1);
         if(action==='pinLeft') state.pinned[colId] = 'left';
         if(action==='pinRight') state.pinned[colId] = 'right';
         if(action==='unpin') delete state.pinned[colId];
