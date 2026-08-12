@@ -16014,6 +16014,7 @@ window.tableau = __webpack_exports__;
       }
       if(Array.isArray(result.filtersOrder)) FILTERS_ORDER = result.filtersOrder;
       if(Array.isArray(result.filtersHidden)) FILTERS_HIDDEN = result.filtersHidden;
+      renderTableauFiltersBar();
 
       const schemaAffected = !!(result.fieldRoles && fields.length) ||
         Array.isArray(result.defaultHiddenDims) || Array.isArray(result.dimHiddenFromColumns) || result.measureOverrides;
