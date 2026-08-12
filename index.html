@@ -15963,7 +15963,7 @@ window.tableau = __webpack_exports__;
     const payload = JSON.stringify({
       formulas: editorFormulas.map(f=>({name:f.label, expr:idsToBracketExpr(f.expr), format:f.format, decimals:f.decimals, thousands:f.thousands})),
       availableFieldNames: DEFAULT_VALUE_COLUMNS.map(c=>c.label),
-      availableFilterFields: TOPFILTER_DIMS.map(id=>DIM_META[id].label),
+      availableFilterFields: Array.from(new Set(tableauFiltersCache.map(f=>stripWrapper(f.fieldName).bare))),
       filtersOrder: FILTERS_ORDER,
       filtersHidden: FILTERS_HIDDEN,
       timeframeOptions: TIMEFRAME_OPTIONS,
@@ -16105,13 +16105,38 @@ window.tableau = __webpack_exports__;
       errEl.textContent = validateExprSyntax(r.expr, availableNames) ? '' : 'Check field references and syntax';
     }
     function filterOrderRowHtml(row){
-      return '<div class="cfg-order-row" draggable="true" data-name="'+escapeAttr(row.name)+'" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #E6E6EE;border-radius:8px;margin-bottom:5px;background:#fff;cursor:grab;font-size:12.5px;">'+
+      return '<div class="cfg-order-row" data-name="'+escapeAttr(row.name)+'" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid #E6E6EE;border-radius:8px;margin-bottom:5px;background:#fff;cursor:grab;font-size:12.5px;">'+
         '<span style="color:#C9C7E8;font-size:12px;">\u28FE</span>'+
         '<label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;" onclick="event.stopPropagation()">'+
           '<input type="checkbox" class="cfg-order-visible" data-name="'+escapeAttr(row.name)+'" '+(row.visible?'checked':'')+'>'+
           '<span style="'+(row.visible?'':'color:#9094AD;text-decoration:line-through;')+'">'+escapeHtml(row.name)+'</span>'+
         '</label>'+
       '</div>';
+    }
+    function ensureRowDragIndicator(){
+      let el = document.getElementById('rowInsertLine');
+      if(!el){
+        el = document.createElement('div');
+        el.id = 'rowInsertLine';
+        el.style.position = 'fixed';
+        el.style.height = '3px';
+        el.style.background = '#5B4EE8';
+        el.style.borderRadius = '2px';
+        el.style.zIndex = '9999';
+        el.style.pointerEvents = 'none';
+        el.style.display = 'none';
+        document.body.appendChild(el);
+      }
+      return el;
+    }
+    function showRowDragIndicator(y, left, width){
+      const el = ensureRowDragIndicator();
+      el.style.top = (y-1.5)+'px'; el.style.left = left+'px'; el.style.width = width+'px';
+      el.style.display = 'block';
+    }
+    function hideRowDragIndicator(){
+      const el = document.getElementById('rowInsertLine');
+      if(el) el.style.display = 'none';
     }
     function renderFilterOrderList(){
       const listEl = document.getElementById('cfgFilterOrderList');
@@ -16124,21 +16149,59 @@ window.tableau = __webpack_exports__;
           renderFilterOrderList();
         });
       });
-      listEl.querySelectorAll('.cfg-order-row').forEach(row=>{
-        row.addEventListener('dragstart', e=>{ e.dataTransfer.setData('text/plain', row.getAttribute('data-name')); });
-        row.addEventListener('dragover', e=>{ e.preventDefault(); row.style.borderColor='#5B4EE8'; });
-        row.addEventListener('dragleave', ()=>{ row.style.borderColor='#E6E6EE'; });
-        row.addEventListener('drop', e=>{
-          e.preventDefault(); row.style.borderColor='#E6E6EE';
-          const draggedName = e.dataTransfer.getData('text/plain');
-          const targetName = row.getAttribute('data-name');
-          if(draggedName===targetName) return;
-          const fromIdx = filterOrderList.findIndex(r=>r.name===draggedName);
-          if(fromIdx===-1) return;
-          const [draggedRow] = filterOrderList.splice(fromIdx,1);
-          const toIdx = filterOrderList.findIndex(r=>r.name===targetName);
-          filterOrderList.splice(toIdx===-1?filterOrderList.length:toIdx,0,draggedRow);
-          renderFilterOrderList();
+      listEl.querySelectorAll('.cfg-order-row').forEach(rowEl=>{
+        rowEl.addEventListener('mousedown', e=>{
+          if(e.target.closest('input')) return; // let the checkbox itself be clicked normally
+          e.preventDefault();
+          const startX = e.clientX, startY = e.clientY;
+          const draggedName = rowEl.getAttribute('data-name');
+          let dragging = false;
+          let dropInfo = null;
+          function onMove(ev){
+            if(!dragging){
+              if(Math.abs(ev.clientX-startX)<4 && Math.abs(ev.clientY-startY)<4) return;
+              dragging = true;
+              document.body.style.userSelect = 'none';
+              document.body.style.cursor = 'grabbing';
+              rowEl.style.background = '#EEEBFC'; rowEl.style.fontWeight = '700'; rowEl.style.color = '#4A3DD6';
+            }
+            const el = document.elementFromPoint(ev.clientX, ev.clientY);
+            const targetRow = el && el.closest('.cfg-order-row');
+            if(!targetRow || targetRow.getAttribute('data-name')===draggedName){ dropInfo = null; hideRowDragIndicator(); return; }
+            const rect = targetRow.getBoundingClientRect();
+            const before = (ev.clientY - rect.top) < rect.height/2;
+            let insertBeforeName, lineY;
+            if(before){ insertBeforeName = targetRow.getAttribute('data-name'); lineY = rect.top; }
+            else {
+              const nextRow = targetRow.nextElementSibling;
+              insertBeforeName = (nextRow && nextRow.getAttribute('data-name')) || null;
+              lineY = rect.bottom;
+            }
+            dropInfo = {insertBeforeName};
+            showRowDragIndicator(lineY, rect.left, rect.width);
+          }
+          function onUp(){
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            document.body.style.userSelect = '';
+            document.body.style.cursor = '';
+            rowEl.style.background = ''; rowEl.style.fontWeight = ''; rowEl.style.color = '';
+            hideRowDragIndicator();
+            if(dragging && dropInfo){
+              const fromIdx = filterOrderList.findIndex(r=>r.name===draggedName);
+              if(fromIdx!==-1){
+                const [draggedRow] = filterOrderList.splice(fromIdx,1);
+                if(dropInfo.insertBeforeName==null){ filterOrderList.push(draggedRow); }
+                else {
+                  const toIdx = filterOrderList.findIndex(r=>r.name===dropInfo.insertBeforeName);
+                  filterOrderList.splice(toIdx===-1?filterOrderList.length:toIdx,0,draggedRow);
+                }
+              }
+              renderFilterOrderList();
+            }
+          }
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
         });
       });
     }
@@ -16165,14 +16228,11 @@ window.tableau = __webpack_exports__;
               '</select></div>'+
             '<div><label style="display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;margin-bottom:4px;">Show Last N Periods</label>'+
               '<input type="number" id="cfgShowLastN" min="1" max="52" value="'+(gs.showLastNPeriods||14)+'" style="width:64px;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;"></div>'+
-            (hasDateField
-              ? '<div style="display:flex;align-items:flex-end;padding-bottom:8px;"><label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:#1F2152;cursor:pointer;"><input type="checkbox" id="cfgShowPeriod" '+(gs.showPeriodByDefault?'checked':'')+'> Show date dimension by default</label></div>'
-              : '')+
           '</div>'+
 
           '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Field Roles</h3>'+
           '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Every field currently on the Marks card, and what SuperTable treats it as. Fix anything wrong here — e.g. a numeric ID that should be a Dimension, not a Measure.</p>'+
-          (fieldRows.length
+          (fieldRows.length || hasDateField
             ? '<div style="max-height:180px;overflow:auto;border:1px solid #E6E6EE;border-radius:8px;margin-bottom:18px;">'+
                 '<table style="width:100%;border-collapse:collapse;font-size:12.5px;">'+
                   '<thead><tr style="background:#FAFAFC;">'+
@@ -16180,7 +16240,20 @@ window.tableau = __webpack_exports__;
                     '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;border-bottom:1px solid #E6E6EE;">Type</th>'+
                     '<th style="text-align:left;padding:7px 9px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:#9094AD;border-bottom:1px solid #E6E6EE;">Role</th>'+
                   '</tr></thead>'+
-                  '<tbody>'+fieldRows.map((f,i)=>fieldRowHtml(f,i)).join('')+'</tbody>'+
+                  '<tbody>'+
+                    (hasDateField
+                      ? '<tr>'+
+                          '<td style="padding:6px 9px;border-bottom:1px solid #E6E6EE;font-weight:500;">Dynamic Date</td>'+
+                          '<td style="padding:6px 9px;border-bottom:1px solid #E6E6EE;color:#565A7E;">derived \u2014 Day/Week/Month/etc, from whichever field is set to Date below</td>'+
+                          '<td style="padding:6px 9px;border-bottom:1px solid #E6E6EE;">'+
+                            '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#1F2152;">'+
+                              '<input type="checkbox" id="cfgShowPeriod" '+(gs.showPeriodByDefault?'checked':'')+'> Show by default'+
+                            '</label>'+
+                          '</td>'+
+                        '</tr>'
+                      : '')+
+                    fieldRows.map((f,i)=>fieldRowHtml(f,i)).join('')+
+                  '</tbody>'+
                 '</table>'+
               '</div>'
             : '<p style="font-size:12px;color:#C2255C;margin-bottom:18px;">No fields detected yet — add fields to the Detail tile on the Marks card, then reopen this dialog.</p>')+
