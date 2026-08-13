@@ -14299,8 +14299,10 @@ window.tableau = __webpack_exports__;
   let SHOW_LAST_N_PERIODS = 14;
   let FILTERS_ORDER = [];
   let FILTERS_HIDDEN = [];
-  let DIM_OVERRIDES = {'__period':{hiddenFromTable:true}}; // key: bare name, or '__period' -> {alias, hiddenFromColumns, hiddenFromTable}
+  let DIM_OVERRIDES = {'__period':{hiddenFromTable:true, hiddenFromColumns:true}}; // key: bare name, or '__period' -> {alias, hiddenFromColumns, hiddenFromTable}
   let MEASURE_FORMAT_OVERRIDES = {}; // bare measure name -> {alias, format, decimals, thousands, hiddenFromColumns, hiddenFromTable}
+  let TABLE_FORMAT = {}; // global visual settings; empty/missing keys fall back to the built-in Violet defaults
+  let FIELD_STYLE_OVERRIDES = {}; // bare field name (dim or measure) -> {textColor,bgColor,fontSize,bold,align,trend,heatmap}
   let DEFAULT_WEEK_START = 'mon';
   let DEFAULT_TIMEFRAME = null; // null = auto-pick by data span, as before
 
@@ -14432,13 +14434,14 @@ window.tableau = __webpack_exports__;
       const sample = sampleRow ? sampleRow[f.index].formattedValue : null;
       const parsed = stripWrapper(f.fieldName);
       const ov = MEASURE_FORMAT_OVERRIDES[parsed.bare] || {};
-      const col = { id:f.id, label: ov.alias || parsed.bare, kind:'measure', agg:(parsed.agg||'SUM'), format:inferFormat(sample), visible: !ov.hiddenFromTable, columnsListHidden: !!ov.hiddenFromColumns };
+      const col = { id:f.id, label: ov.alias || parsed.bare, naturalLabel: parsed.bare, kind:'measure', agg:(parsed.agg||'SUM'), format:inferFormat(sample), visible: !ov.hiddenFromTable, columnsListHidden: !!ov.hiddenFromColumns };
       if(ov.format) col.format = ov.format;
       if(ov.decimals!=null) col.decimals = ov.decimals;
       if(ov.thousands!=null) col.thousands = ov.thousands;
       return col;
     });
     measures.forEach(f=>{ DEFAULT_WIDTHS[f.id] = Math.max(95, Math.min(160, f.fieldName.length*9+50)); });
+    applyTableFormat();
 
     if(dateField && RAW.length){
       const times = RAW.map(r=>r[DATE_FIELD_ID].getTime());
@@ -14471,6 +14474,80 @@ window.tableau = __webpack_exports__;
   function dimKeyFor(d){ return d==='__period' ? '__period' : (DIM_META[d].naturalLabel || DIM_META[d].label); }
   function dimOverrideFor(d){ return DIM_OVERRIDES[dimKeyFor(d)] || {}; }
 
+  // Maps a field's stable natural (pre-alias) name to its current column id — used to resolve
+  // FIELD_STYLE_OVERRIDES (which persist keyed by name, same convention as everything else)
+  // into a concrete data-colid selector, since ids can only be trusted for the current session.
+  function naturalNameToId(){
+    const map = {};
+    DIM_ORDER.forEach(d=>{ map[dimKeyFor(d)] = d; });
+    (DEFAULT_VALUE_COLUMNS||[]).forEach(c=>{ map[c.naturalLabel||c.label] = c.id; });
+    return map;
+  }
+
+  const ALIGN_CSS = {left:'left', center:'center', right:'right'};
+  function applyTableFormat(){
+    const t = TABLE_FORMAT || {};
+    let css = '';
+    if(t.tableBgColor) css += '.table-shell, tbody td{background:'+t.tableBgColor+';}\n';
+    if(t.headerBgColor) css += '.th-inner{background:'+t.headerBgColor+';}\n';
+    if(t.headerTextColor) css += '.th-label{color:'+t.headerTextColor+';}\n';
+    if(t.boldHeaders) css += '.th-label{font-weight:700;}\n';
+    if(t.boldDimensions) css += 'td.dimcell{font-weight:700;}\n';
+    if(t.fontFamily) css += '.app, .th-label, tbody td, .dr-field, .tf-btn{font-family:'+t.fontFamily+';}\n';
+    if(t.align) css += '.th-label-wrap{justify-content:'+({left:'flex-start',center:'center',right:'flex-end'}[t.align]||'flex-start')+';} td.dimcell{text-align:'+ALIGN_CSS[t.align]+';}\n';
+    if(t.fontSize) css += 'tbody td{font-size:'+t.fontSize+'px;} .th-label{font-size:'+Math.max(9,t.fontSize-1)+'px;}\n';
+    if(t.zebraStriping) css += 'tbody tr:nth-child(even) td{background:'+(t.zebraColor||'#FAFAFC')+';}\n';
+    if(t.borderColor) css += 'th,td{border-color:'+t.borderColor+';}\n';
+
+    // Field-specific overrides: color/background/size/bold/align, targeted by data-colid so they
+    // travel correctly with a column regardless of reordering.
+    const nameToId = naturalNameToId();
+    Object.keys(FIELD_STYLE_OVERRIDES).forEach(name=>{
+      const ov = FIELD_STYLE_OVERRIDES[name];
+      const id = nameToId[name];
+      if(!id || !ov) return;
+      const headerSel = 'th[data-colid="'+id+'"] .th-label';
+      const cellSel = 'td[data-colid="'+id+'"]';
+      let rules = '';
+      if(ov.textColor) rules += 'color:'+ov.textColor+';';
+      if(ov.bgColor) rules += 'background:'+ov.bgColor+';';
+      if(ov.fontSize) rules += 'font-size:'+ov.fontSize+'px;';
+      if(ov.bold) rules += 'font-weight:700;';
+      if(ov.align) rules += 'text-align:'+ov.align+';';
+      if(rules) css += cellSel+'{'+rules+'}\n';
+      if(ov.textColor) css += headerSel+'{color:'+ov.textColor+';}\n';
+    });
+
+    let styleEl = document.getElementById('dynamicFormatStyle');
+    if(!styleEl){ styleEl = document.createElement('style'); styleEl.id = 'dynamicFormatStyle'; document.head.appendChild(styleEl); }
+    styleEl.textContent = css;
+  }
+
+  const HEATMAP_PALETTES = {
+    purple: ['#F5F3FF','#5B4EE8'], green: ['#ECFDF3','#0E9E84'], red: ['#FFF1F2','#C2255C'], amber: ['#FFF8E1','#E3A008']
+  };
+  function hexToRgb(hex){ hex = hex.replace('#',''); return {r:parseInt(hex.substring(0,2),16), g:parseInt(hex.substring(2,4),16), b:parseInt(hex.substring(4,6),16)}; }
+  function lerpColor(hex0, hex1, t){
+    const a = hexToRgb(hex0), b = hexToRgb(hex1);
+    return 'rgb('+Math.round(a.r+(b.r-a.r)*t)+','+Math.round(a.g+(b.g-a.g)*t)+','+Math.round(a.b+(b.b-a.b)*t)+')';
+  }
+  function heatmapColor(value, min, max, palette){
+    if(max===min) return null;
+    const t = Math.max(0, Math.min(1, (value-min)/(max-min)));
+    const pair = HEATMAP_PALETTES[palette] || HEATMAP_PALETTES.purple;
+    return lerpColor(pair[0], pair[1], t);
+  }
+  function trendArrowHtml(delta, trendCfg){
+    const posColor = (trendCfg&&trendCfg.positiveColor) || '#0E9E84';
+    const negColor = (trendCfg&&trendCfg.negativeColor) || '#C2255C';
+    const neuColor = (trendCfg&&trendCfg.neutralColor) || '#9094AD';
+    if(delta==null) return ' <span style="color:'+neuColor+';font-size:10px;">\u25AC</span>';
+    if(delta>0) return ' <span style="color:'+posColor+';font-size:10px;">\u25B2</span>';
+    if(delta<0) return ' <span style="color:'+negColor+';font-size:10px;">\u25BC</span>';
+    return ' <span style="color:'+neuColor+';font-size:10px;">\u25AC</span>';
+  }
+
+
   function defaultState(){
     return {
       groupBy: new Set(DIM_ORDER.filter(d=>!dimOverrideFor(d).hiddenFromTable)),
@@ -14492,6 +14569,7 @@ window.tableau = __webpack_exports__;
   }
   let state = null;
   let chartInstance = null;
+  let IS_AUTHORING = false;
 
   function getWidth(id){ return state.colWidths[id]!==undefined ? state.colWidths[id] : (DEFAULT_WIDTHS[id]||120); }
   function setColWidth(id,w){ state.colWidths[id]=w; }
@@ -14688,6 +14766,7 @@ window.tableau = __webpack_exports__;
   ============================================================ */
   function render(){
     if(DATE_FIELD_ID) DIM_META['__period'].label = periodDimLabel(state.dateRange.timeframe);
+    persistLayoutSilently();
     renderDateRangeBar();
 
     if(state.pivot.active){ updateModeUI(); renderPivotView(); return; }
@@ -14844,7 +14923,21 @@ window.tableau = __webpack_exports__;
       return;
     }
     const groupByArr = cols.filter(c=>c.type==='dim').map(c=>c.id);
-    tbody.innerHTML = rows.map(r=>{
+    const idToName = {}; Object.entries(naturalNameToId()).forEach(([name,id])=>{ idToName[id]=name; });
+    const columnExtras = {};
+    cols.forEach(c=>{
+      if(c.type!=='value') return;
+      const name = idToName[c.id]; if(!name) return;
+      const ov = FIELD_STYLE_OVERRIDES[name]; if(!ov) return;
+      const extra = {};
+      if(ov.heatmap && ov.heatmap.enabled){
+        const vals = rows.map(r=>r[c.id]).filter(v=>typeof v==='number' && isFinite(v));
+        if(vals.length) extra.heatmap = {min:Math.min(...vals), max:Math.max(...vals), palette: ov.heatmap.palette||'purple'};
+      }
+      if(ov.trend && ov.trend.enabled) extra.trend = ov.trend;
+      if(extra.heatmap || extra.trend) columnExtras[c.id] = extra;
+    });
+    tbody.innerHTML = rows.map((r,rowIdx)=>{
       const key = rowKey(r, groupByArr);
       const selected = state.selected.has(key);
       return '<tr data-key="'+escapeAttr(key)+'" class="'+(selected?'selected':'')+'">'+
@@ -14856,7 +14949,21 @@ window.tableau = __webpack_exports__;
             const text = dimCellText(c,r);
             return '<td class="dimcell'+(edgeClass?' '+edgeClass:'')+'" data-colid="'+c.id+'" data-value="'+escapeAttr(text)+'" title="'+escapeAttr(text)+'"'+(stickyStyle?' style="'+stickyStyle+'background:'+(selected?'var(--accent-soft)':'#fff')+';"':'')+'>'+escapeHtml(text)+'</td>';
           }
-          return '<td class="num'+(edgeClass?' '+edgeClass:'')+'" data-colid="'+c.id+'"'+(stickyStyle?' style="'+stickyStyle+'background:'+(selected?'var(--accent-soft)':'#fff')+';"':'')+'>'+renderValueCell(c,r[c.id])+'</td>';
+          const v = r[c.id];
+          const extra = columnExtras[c.id];
+          let extraBg = '', extraHtml = '';
+          if(extra){
+            if(extra.heatmap && typeof v==='number'){
+              const bg = heatmapColor(v, extra.heatmap.min, extra.heatmap.max, extra.heatmap.palette);
+              if(bg) extraBg = 'background:'+bg+';';
+            }
+            if(extra.trend){
+              const prevV = rowIdx>0 ? rows[rowIdx-1][c.id] : null;
+              extraHtml = (typeof v==='number' && typeof prevV==='number') ? trendArrowHtml(v-prevV, extra.trend) : trendArrowHtml(null, extra.trend);
+            }
+          }
+          const baseStyle = (stickyStyle?stickyStyle+'background:'+(selected?'var(--accent-soft)':'#fff')+';':'') + extraBg;
+          return '<td class="num'+(edgeClass?' '+edgeClass:'')+'" data-colid="'+c.id+'"'+(baseStyle?' style="'+baseStyle+'"':'')+'>'+renderValueCell(c,v)+extraHtml+'</td>';
         }).join('')+
       '</tr>';
     }).join('');
@@ -15659,6 +15766,43 @@ window.tableau = __webpack_exports__;
     document.getElementById('errorMsg').textContent = message;
   }
 
+  function applySavedLayout(){
+    try{
+      const raw = tableau.extensions.settings.get('supertableLayout');
+      if(!raw) return;
+      const saved = JSON.parse(raw);
+      if(Array.isArray(saved.columnOrder)){
+        const validIds = new Set(state.columnOrder);
+        const filtered = saved.columnOrder.filter(id=>validIds.has(id));
+        const missing = state.columnOrder.filter(id=>!filtered.includes(id));
+        if(filtered.length) state.columnOrder = filtered.concat(missing);
+      }
+      if(saved.pinned) state.pinned = saved.pinned;
+      if(saved.colWidths) state.colWidths = saved.colWidths;
+      if(Array.isArray(saved.groupBy) && saved.groupBy.length){
+        const validGroup = saved.groupBy.filter(d=>DIM_ORDER.includes(d));
+        if(validGroup.length) state.groupBy = new Set(validGroup);
+      }
+      if(saved.sort) state.sort = saved.sort;
+    }catch(e){ /* no saved layout yet, or it didn't parse — just use the computed default */ }
+  }
+  let _layoutSaveTimer = null;
+  function persistLayoutSilently(){
+    if(!IS_AUTHORING || !state) return;
+    clearTimeout(_layoutSaveTimer);
+    _layoutSaveTimer = setTimeout(()=>{
+      const payload = {
+        columnOrder: state.columnOrder,
+        pinned: state.pinned,
+        colWidths: state.colWidths,
+        groupBy: Array.from(state.groupBy),
+        sort: state.sort
+      };
+      tableau.extensions.settings.set('supertableLayout', JSON.stringify(payload));
+      tableau.extensions.settings.saveAsync().catch(err=>console.warn('Layout autosave failed:', err));
+    }, 800);
+  }
+
   function loadSavedDefaults(){
     try{
       const raw = tableau.extensions.settings.get('supertableDefaults');
@@ -15704,7 +15848,9 @@ window.tableau = __webpack_exports__;
       filtersOrder: FILTERS_ORDER,
       filtersHidden: FILTERS_HIDDEN,
       dimOverrides: DIM_OVERRIDES,
-      measureOverrides: MEASURE_FORMAT_OVERRIDES
+      measureOverrides: MEASURE_FORMAT_OVERRIDES,
+      tableFormat: TABLE_FORMAT,
+      fieldStyleOverrides: FIELD_STYLE_OVERRIDES
     };
     tableau.extensions.settings.set('supertableDefaults', JSON.stringify(payload));
     tableau.extensions.settings.saveAsync().then(()=> showToast('Saved as default for all viewers'));
@@ -15868,6 +16014,8 @@ window.tableau = __webpack_exports__;
         if(Array.isArray(savedGeneral.filtersHidden)) FILTERS_HIDDEN = savedGeneral.filtersHidden;
         if(savedGeneral.dimOverrides) DIM_OVERRIDES = savedGeneral.dimOverrides;
         if(savedGeneral.measureOverrides) MEASURE_FORMAT_OVERRIDES = savedGeneral.measureOverrides;
+        if(savedGeneral.tableFormat) TABLE_FORMAT = savedGeneral.tableFormat;
+        if(savedGeneral.fieldStyleOverrides) FIELD_STYLE_OVERRIDES = savedGeneral.fieldStyleOverrides;
       }
 
       const dataTable = await fetchWorksheetData(currentWorksheet);
@@ -15878,6 +16026,8 @@ window.tableau = __webpack_exports__;
       state = defaultState();
       if(schemaInfo.dateRangeDefault) state.dateRange = schemaInfo.dateRangeDefault;
       applySavedDefaults(savedGeneral);
+      applySavedLayout();
+      IS_AUTHORING = !!(tableau.extensions.environment && tableau.extensions.environment.mode === tableau.ExtensionMode.Authoring);
 
       document.getElementById('loadingScreen').classList.add('hidden');
       document.getElementById('appRoot').classList.remove('hidden');
@@ -15991,9 +16141,11 @@ window.tableau = __webpack_exports__;
         hiddenFromColumns: vc?!!vc.columnsListHidden:false, hiddenFromTable: vc?!vc.visible:false};
     });
     const payload = JSON.stringify({
-      formulas: editorFormulas.map(f=>({name:f.label, expr:idsToBracketExpr(f.expr)})),
+      formulas: editorFormulas.map(f=>({name:f.label, expr:idsToBracketExpr(f.expr), format:f.format, decimals:f.decimals, thousands:f.thousands})),
       calcMeasures: calcMeasures,
       availableFieldNames: DEFAULT_VALUE_COLUMNS.map(c=>c.label),
+      allFieldNames: DIM_ORDER.map(d=>dimKeyFor(d)).concat(DEFAULT_VALUE_COLUMNS.map(c=>c.naturalLabel||c.label)),
+      measureFieldNames: DEFAULT_VALUE_COLUMNS.map(c=>c.naturalLabel||c.label),
       availableFilterFields: Array.from(new Set(tableauFiltersCache.map(f=>stripWrapper(f.fieldName).bare))),
       filtersOrder: FILTERS_ORDER,
       filtersHidden: FILTERS_HIDDEN,
@@ -16002,6 +16154,8 @@ window.tableau = __webpack_exports__;
       generalSettings: {currencySymbol:CURRENCY_SYMBOL, currencyExchangeRate:CURRENCY_EXCHANGE_RATE, weekStart:DEFAULT_WEEK_START, defaultTimeframe:DEFAULT_TIMEFRAME||'', showLastNPeriods:SHOW_LAST_N_PERIODS},
       dimOverrides: DIM_OVERRIDES,
       measureOverrides: MEASURE_FORMAT_OVERRIDES,
+      tableFormat: TABLE_FORMAT,
+      fieldStyleOverrides: FIELD_STYLE_OVERRIDES,
       fields: fields
     });
     const popupUrl = location.origin + location.pathname + '?dialog=configure';
@@ -16032,6 +16186,8 @@ window.tableau = __webpack_exports__;
 
       if(result.dimOverrides) DIM_OVERRIDES = result.dimOverrides;
       if(result.measureOverrides) MEASURE_FORMAT_OVERRIDES = result.measureOverrides;
+      if(result.tableFormat) TABLE_FORMAT = result.tableFormat;
+      if(result.fieldStyleOverrides) FIELD_STYLE_OVERRIDES = result.fieldStyleOverrides;
       if(result.fieldRoles && fields.length) fieldRoleOverrides = result.fieldRoles;
 
       const persistRoles = (result.fieldRoles && fields.length) ? saveFieldRoleOverrides(fieldRoleOverrides) : Promise.resolve();
@@ -16044,6 +16200,7 @@ window.tableau = __webpack_exports__;
           if(schemaInfo.dateRangeDefault) state.dateRange = schemaInfo.dateRangeDefault;
           applySavedDefaults(loadSavedDefaults());
         }
+        applyTableFormat();
         applyEditorFormulas(result.formulas || []);
       });
     }).catch(err=>{
@@ -16092,7 +16249,7 @@ window.tableau = __webpack_exports__;
     const timeframeOptions = initial.timeframeOptions || [];
     const gs = initial.generalSettings || {};
     const hasDateField = !!initial.hasDateField;
-    const calcRows = (initial.formulas || []).map(f=>({name:f.name||'', expr:f.expr||''}));
+    const calcRows = (initial.formulas || []).map(f=>({name:f.name||'', expr:f.expr||'', format:f.format||'number', decimals: f.decimals!=null?f.decimals:0, thousands: f.thousands!==false}));
     const allFilterFields = initial.availableFilterFields || [];
     const hiddenFilterSet = new Set(initial.filtersHidden||[]);
     let filterOrderList = (initial.filtersOrder||[]).filter(n=>allFilterFields.includes(n)).map(n=>({name:n, visible:!hiddenFilterSet.has(n)}));
@@ -16100,6 +16257,21 @@ window.tableau = __webpack_exports__;
 
     const dimOv = initial.dimOverrides || {};
     const measureOv = initial.measureOverrides || {};
+    const allFieldNames = initial.allFieldNames || [];
+    const measureFieldNames = initial.measureFieldNames || [];
+
+    const formatState = Object.assign({
+      headerTextColor:'', headerBgColor:'', tableBgColor:'', boldHeaders:false, boldDimensions:false,
+      fontFamily:'', align:'', fontSize:'', zebraStriping:false, zebraColor:'#FAFAFC', borderColor:''
+    }, initial.tableFormat||{});
+    let fieldStyleRows = Object.keys(initial.fieldStyleOverrides||{}).map(name=>{
+      const ov = initial.fieldStyleOverrides[name] || {};
+      const t = ov.trend||{}, h = ov.heatmap||{};
+      return { name, isMeasure: measureFieldNames.includes(name),
+        textColor: ov.textColor||'', bgColor: ov.bgColor||'', fontSize: ov.fontSize||'', bold: !!ov.bold, align: ov.align||'',
+        trendEnabled: !!t.enabled, trendPos: t.positiveColor||'#0E9E84', trendNeg: t.negativeColor||'#C2255C', trendNeu: t.neutralColor||'#9094AD',
+        heatmapEnabled: !!h.enabled, heatmapPalette: h.palette||'purple' };
+    });
 
     const generalState = {
       currencySymbol: gs.currencySymbol || '$',
@@ -16127,8 +16299,9 @@ window.tableau = __webpack_exports__;
         showInColumns: !ov.hiddenFromColumns, showInTable: !ov.hiddenFromTable };
     });
     (initial.calcMeasures||[]).forEach(m=>{
-      measureRows.push({ name:m.name, isCalculated:true, alias:'', format:m.format||'number',
-        decimals: m.decimals!=null?m.decimals:2, thousands: m.thousands!==false,
+      const calcRow = calcRows.find(c=>c.name.toLowerCase()===m.name.toLowerCase());
+      measureRows.push({ name:m.name, isCalculated:true, alias:'',
+        format: calcRow?calcRow.format:(m.format||'number'), decimals: calcRow?calcRow.decimals:(m.decimals!=null?m.decimals:2), thousands: calcRow?calcRow.thousands:(m.thousands!==false),
         showInColumns: !m.hiddenFromColumns, showInTable: !m.hiddenFromTable });
     });
 
@@ -16139,6 +16312,7 @@ window.tableau = __webpack_exports__;
       {id:'filters', label:'Filters'},
       {id:'dimensions', label:'Dimensions'},
       {id:'measures', label:'Measures'},
+      {id:'format', label:'Format'},
       {id:'calc', label:'Calculated Fields'}
     ];
     let activeTab = 'general';
@@ -16148,14 +16322,30 @@ window.tableau = __webpack_exports__;
     const smallCheck = (id, checked) => '<input type="checkbox" id="'+id+'" '+(checked?'checked':'')+'>';
 
     // ---- Calculated Fields tab: name + expression only; formatting/visibility now lives in Measures ----
+    const CALC_FORMAT_LABEL = {number:'Number', currency:'Currency', percent:'Percent'};
+    const CALC_DEFAULT_DECIMALS = {number:0, currency:2, percent:1};
     function calcRowHtml(r,i){
-      return '<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:8px;padding:10px;border:1px solid #E6E6EE;border-radius:10px;background:#FAFAFC;">'+
-        '<div style="flex:1;min-width:0;">'+
-          '<input id="calcName'+i+'" type="text" placeholder="Name (e.g. CPA)" value="'+escapeAttr(r.name)+'" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;margin-bottom:5px;box-sizing:border-box;font-family:inherit;">'+
-          '<input id="calcExpr'+i+'" type="text" placeholder="e.g. [Cost] / [Total Leads]" value="'+escapeAttr(r.expr)+'" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;box-sizing:border-box;font-family:inherit;">'+
-          '<div id="calcErr'+i+'" style="font-size:11px;color:#C2255C;min-height:14px;margin-top:3px;"></div>'+
+      return '<div style="margin-bottom:10px;padding:12px;border:1px solid #E6E6EE;border-radius:10px;background:#FAFAFC;">'+
+        '<div style="display:flex;gap:6px;align-items:flex-start;">'+
+          '<div style="flex:1;min-width:0;">'+
+            '<input id="calcName'+i+'" type="text" placeholder="Name (e.g. CPA)" value="'+escapeAttr(r.name)+'" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;margin-bottom:5px;box-sizing:border-box;font-family:inherit;">'+
+            '<input id="calcExpr'+i+'" type="text" placeholder="e.g. [Cost] / [Total Leads]" value="'+escapeAttr(r.expr)+'" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;box-sizing:border-box;font-family:inherit;">'+
+          '</div>'+
+          '<button id="calcRemove'+i+'" title="Remove" style="border:none;background:none;color:#9094AD;font-size:18px;cursor:pointer;line-height:1;padding:4px;">\u00D7</button>'+
         '</div>'+
-        '<button id="calcRemove'+i+'" title="Remove" style="border:none;background:none;color:#9094AD;font-size:18px;cursor:pointer;line-height:1;padding:4px;">\u00D7</button>'+
+        '<div id="calcTokens'+i+'" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:5px;">'+
+          availableNames.map(n=>'<span class="calc-tok" data-row="'+i+'" data-tok="'+escapeAttr(n)+'" style="font-size:10.5px;background:#EEEBFC;color:#4A3DD6;padding:2px 8px;border-radius:999px;cursor:pointer;border:1px solid #D9D9FF;">'+escapeHtml(n)+'</span>').join('')+
+        '</div>'+
+        '<div style="display:flex;gap:10px;align-items:center;margin-top:8px;">'+
+          '<label style="font-size:11.5px;color:#565A7E;display:flex;align-items:center;gap:5px;">Format<select id="calcFormat'+i+'" style="font-size:12px;padding:4px 5px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+            Object.keys(CALC_FORMAT_LABEL).map(f=>'<option value="'+f+'" '+(r.format===f?'selected':'')+'>'+CALC_FORMAT_LABEL[f]+'</option>').join('')+
+          '</select></label>'+
+          '<label style="font-size:11.5px;color:#565A7E;display:flex;align-items:center;gap:5px;">Decimals<select id="calcDecimals'+i+'" style="font-size:12px;padding:4px 5px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+            [0,1,2,3,4].map(n=>'<option value="'+n+'" '+(n===r.decimals?'selected':'')+'>'+n+'</option>').join('')+
+          '</select></label>'+
+          '<label style="font-size:11.5px;color:#565A7E;display:flex;align-items:center;gap:5px;"><input type="checkbox" id="calcThousands'+i+'" '+(r.thousands?'checked':'')+'> Thousands separator</label>'+
+        '</div>'+
+        '<div id="calcErr'+i+'" style="font-size:11px;color:#C2255C;min-height:14px;margin-top:5px;"></div>'+
       '</div>';
     }
     function validateCalcRow(r, errEl){
@@ -16165,10 +16355,7 @@ window.tableau = __webpack_exports__;
     }
     function calcTabHtml(){
       return '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Calculated Metric Formulas</h3>'+
-        '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Reference native measures exactly as named, in [brackets]. Supports + \u2212 \u00D7 \u00F7, parentheses, and MAX()/MIN(). If a name matches an existing measure, this replaces how it\'s calculated instead of adding a new column. Format, decimals, alias, and visibility for these are managed in the Measures tab, same as core measures.</p>'+
-        (availableNames.length
-          ? '<div style="margin-bottom:14px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#9094AD;font-weight:600;margin-bottom:5px;">Available measures</div><div style="display:flex;flex-wrap:wrap;gap:5px;">'+availableNames.map(n=>'<span style="font-size:11px;background:#EEEBFC;color:#4A3DD6;padding:2px 8px;border-radius:999px;">'+escapeHtml(n)+'</span>').join('')+'</div></div>'
-          : '')+
+        '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Click a field below to insert it, or type it yourself in [brackets]. Supports + \u2212 \u00D7 \u00F7, parentheses, and MAX()/MIN(). If a name matches an existing measure, this replaces how it\'s calculated instead of adding a new column. Alias and visibility for these are managed in the Measures tab, same as core measures \u2014 format and decimals live here, next to the formula itself.</p>'+
         '<div id="calcRowsWrap">'+(calcRows.map((r,i)=>calcRowHtml(r,i)).join('') || '<p style="font-size:12px;color:#9094AD;">No calculated fields yet \u2014 click "+ Add Formula" below.</p>')+'</div>'+
         '<button id="calcAddRow" style="margin-top:6px;font-size:12.5px;font-weight:600;color:#4A3DD6;background:#EEEBFC;border:1px solid #D9D9FF;border-radius:8px;padding:7px 12px;cursor:pointer;font-family:inherit;">+ Add Formula</button>';
     }
@@ -16178,13 +16365,28 @@ window.tableau = __webpack_exports__;
         const exprEl = document.getElementById('calcExpr'+i);
         const removeEl = document.getElementById('calcRemove'+i);
         const errEl = document.getElementById('calcErr'+i);
+        const fmtEl = document.getElementById('calcFormat'+i);
+        const decEl = document.getElementById('calcDecimals'+i);
+        const thouEl = document.getElementById('calcThousands'+i);
         if(nameEl) nameEl.addEventListener('input', ()=>{ r.name = nameEl.value; });
         if(exprEl) exprEl.addEventListener('input', ()=>{ r.expr = exprEl.value; validateCalcRow(r, errEl); });
         if(removeEl) removeEl.addEventListener('click', ()=>{ calcRows.splice(i,1); renderTabPanel(); });
+        if(fmtEl) fmtEl.addEventListener('change', ()=>{ r.format = fmtEl.value; decEl.value = CALC_DEFAULT_DECIMALS[fmtEl.value]; r.decimals = CALC_DEFAULT_DECIMALS[fmtEl.value]; });
+        if(decEl) decEl.addEventListener('change', ()=>{ r.decimals = parseInt(decEl.value,10); });
+        if(thouEl) thouEl.addEventListener('change', ()=>{ r.thousands = thouEl.checked; });
         validateCalcRow(r, errEl);
       });
+      document.querySelectorAll('.calc-tok').forEach(tok=>{
+        tok.addEventListener('click', ()=>{
+          const i = tok.getAttribute('data-row');
+          const input = document.getElementById('calcExpr'+i);
+          input.value = (input.value ? input.value+' ' : '') + '[' + tok.getAttribute('data-tok') + ']';
+          input.dispatchEvent(new Event('input'));
+          input.focus();
+        });
+      });
       const addBtn = document.getElementById('calcAddRow');
-      if(addBtn) addBtn.addEventListener('click', ()=>{ calcRows.push({name:'', expr:''}); renderTabPanel(); });
+      if(addBtn) addBtn.addEventListener('click', ()=>{ calcRows.push({name:'', expr:'', format:'number', decimals:0, thousands:true}); renderTabPanel(); });
     }
 
     // ---- Filters tab (pointer-based drag-reorder + show/hide) ----
@@ -16353,16 +16555,20 @@ window.tableau = __webpack_exports__;
 
     // ---- Measures tab ----
     function measureRowHtml(r,i){
+      const fmtCell = r.isCalculated
+        ? '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;color:#9094AD;font-size:11.5px;">'+FORMAT_LABEL[r.format]+' (set in Calculated Fields)</td>'+
+          '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;color:#9094AD;font-size:11.5px;">'+r.decimals+'</td>'
+        : '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;"><select id="measFormat'+i+'" style="width:100%;font-size:12px;padding:5px 4px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+            Object.keys(FORMAT_LABEL).map(f=>'<option value="'+f+'" '+(r.format===f?'selected':'')+'>'+FORMAT_LABEL[f]+'</option>').join('')+
+          '</select></td>'+
+          '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;"><select id="measDecimals'+i+'" style="width:100%;font-size:12px;padding:5px 4px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+            [0,1,2,3,4].map(n=>'<option value="'+n+'" '+(n===r.decimals?'selected':'')+'>'+n+'</option>').join('')+
+          '</select></td>';
       return '<tr>'+
         '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;font-weight:500;">'+escapeHtml(r.name)+'</td>'+
         '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;color:#565A7E;">'+(r.isCalculated?'Calculated':'Core')+'</td>'+
         '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;">'+smallInput('measAlias'+i, r.alias, r.name)+'</td>'+
-        '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;"><select id="measFormat'+i+'" style="width:100%;font-size:12px;padding:5px 4px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
-          Object.keys(FORMAT_LABEL).map(f=>'<option value="'+f+'" '+(r.format===f?'selected':'')+'>'+FORMAT_LABEL[f]+'</option>').join('')+
-        '</select></td>'+
-        '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;"><select id="measDecimals'+i+'" style="width:100%;font-size:12px;padding:5px 4px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
-          [0,1,2,3,4].map(n=>'<option value="'+n+'" '+(n===r.decimals?'selected':'')+'>'+n+'</option>').join('')+
-        '</select></td>'+
+        fmtCell+
         '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;text-align:center;">'+smallCheck('measShowCol'+i, r.showInColumns)+'</td>'+
         '<td style="padding:6px 8px;border-bottom:1px solid #E6E6EE;text-align:center;">'+smallCheck('measShowTable'+i, r.showInTable)+'</td>'+
       '</tr>';
@@ -16399,6 +16605,129 @@ window.tableau = __webpack_exports__;
       bind('measTableAll','showInTable',true); bind('measTableNone','showInTable',false);
     }
 
+    // ---- Format tab: global table styling + per-field overrides ----
+    const FONT_OPTIONS = [
+      {v:'', label:'Default (Helvetica)'},
+      {v:'Georgia, serif', label:'Georgia (serif)'},
+      {v:'"Courier New", monospace', label:'Courier New (mono)'},
+      {v:'Arial, sans-serif', label:'Arial'},
+      {v:'Verdana, sans-serif', label:'Verdana'}
+    ];
+    function colorMini(id, label, value){
+      return '<div><label style="display:block;font-size:10px;color:#9094AD;margin-bottom:3px;">'+label+'</label><input type="color" id="'+id+'" value="'+(value||'#ffffff')+'" style="width:40px;height:28px;border:1px solid #E6E6EE;border-radius:6px;padding:2px;cursor:pointer;"></div>';
+    }
+    function formatTabHtml(){
+      return '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Format</h3>'+
+        '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Nothing here is required \u2014 leave a control at its default to keep the current look. The existing design is always the fallback.</p>'+
+        '<div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><button id="fmtResetAll" style="font-size:12px;font-weight:600;color:#C2255C;background:#FBE0EA;border:1px solid #FBE0EA;border-radius:8px;padding:6px 12px;cursor:pointer;font-family:inherit;">Reset to Default</button></div>'+
+        '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #E6E6EE;">'+
+          colorMini('fmtHeaderText','Header Text Color', formatState.headerTextColor||'#9094AD')+
+          colorMini('fmtHeaderBg','Header Background', formatState.headerBgColor||'#FAFAFC')+
+          colorMini('fmtTableBg','Table Background', formatState.tableBgColor||'#FFFFFF')+
+          colorMini('fmtBorderColor','Border Color', formatState.borderColor||'#E6E6EE')+
+          '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#1F2152;cursor:pointer;padding-bottom:6px;"><input type="checkbox" id="fmtBoldHeaders" '+(formatState.boldHeaders?'checked':'')+'> Bold Headers</label>'+
+          '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#1F2152;cursor:pointer;padding-bottom:6px;"><input type="checkbox" id="fmtBoldDims" '+(formatState.boldDimensions?'checked':'')+'> Bold Dimensions</label>'+
+          '<div><label style="display:block;font-size:10px;color:#9094AD;margin-bottom:3px;">Font Family</label><select id="fmtFontFamily" style="font-size:12px;padding:5px 6px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+            FONT_OPTIONS.map(o=>'<option value="'+escapeAttr(o.v)+'" '+(formatState.fontFamily===o.v?'selected':'')+'>'+o.label+'</option>').join('')+
+          '</select></div>'+
+          '<div><label style="display:block;font-size:10px;color:#9094AD;margin-bottom:3px;">Alignment</label><select id="fmtAlign" style="font-size:12px;padding:5px 6px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+            [{v:'',l:'Default'},{v:'left',l:'Left'},{v:'center',l:'Center'},{v:'right',l:'Right'}].map(o=>'<option value="'+o.v+'" '+(formatState.align===o.v?'selected':'')+'>'+o.l+'</option>').join('')+
+          '</select></div>'+
+          '<div><label style="display:block;font-size:10px;color:#9094AD;margin-bottom:3px;">Font Size (px)</label><input type="number" id="fmtFontSize" min="9" max="20" placeholder="default" value="'+(formatState.fontSize||'')+'" style="width:70px;font-size:12px;padding:5px 6px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;"></div>'+
+          '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#1F2152;cursor:pointer;padding-bottom:6px;"><input type="checkbox" id="fmtZebra" '+(formatState.zebraStriping?'checked':'')+'> Zebra Striping</label>'+
+          colorMini('fmtZebraColor','Zebra Row Color', formatState.zebraColor)+
+        '</div>'+
+        '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Field-Specific Formatting</h3>'+
+        '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Pick a dimension or measure to give it its own look. Measures also get a trend arrow and heatmap option.</p>'+
+        '<div style="display:flex;gap:8px;margin-bottom:12px;">'+
+          '<select id="fmtAddFieldSelect" style="flex:1;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+            '<option value="">Choose a field\u2026</option>'+
+            allFieldNames.filter(n=>!fieldStyleRows.some(r=>r.name===n)).map(n=>'<option value="'+escapeAttr(n)+'">'+escapeHtml(n)+'</option>').join('')+
+          '</select>'+
+          '<button id="fmtAddFieldBtn" style="font-size:12.5px;font-weight:600;color:#4A3DD6;background:#EEEBFC;border:1px solid #D9D9FF;border-radius:8px;padding:6px 14px;cursor:pointer;font-family:inherit;">+ Add</button>'+
+        '</div>'+
+        '<div id="fmtFieldRows">'+(fieldStyleRows.map((r,i)=>fieldStyleRowHtml(r,i)).join('') || '<p style="font-size:12px;color:#9094AD;">No field-specific formatting yet.</p>')+'</div>';
+    }
+    function fieldStyleRowHtml(r,i){
+      const trendHeatmap = r.isMeasure
+        ? '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed #E6E6EE;display:flex;gap:20px;flex-wrap:wrap;">'+
+            '<div>'+
+              '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#1F2152;cursor:pointer;margin-bottom:6px;"><input type="checkbox" id="fsTrendEnabled'+i+'" '+(r.trendEnabled?'checked':'')+'> Trend arrow (row-over-row change)</label>'+
+              '<div style="display:flex;gap:10px;">'+colorMini('fsTrendPos'+i,'Positive',r.trendPos)+colorMini('fsTrendNeg'+i,'Negative',r.trendNeg)+colorMini('fsTrendNeu'+i,'Neutral',r.trendNeu)+'</div>'+
+            '</div>'+
+            '<div>'+
+              '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#1F2152;cursor:pointer;margin-bottom:6px;"><input type="checkbox" id="fsHeatEnabled'+i+'" '+(r.heatmapEnabled?'checked':'')+'> Heatmap</label>'+
+              '<select id="fsHeatPalette'+i+'" style="font-size:12px;padding:5px 6px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
+                ['purple','green','red','amber'].map(p=>'<option value="'+p+'" '+(r.heatmapPalette===p?'selected':'')+'>'+p.charAt(0).toUpperCase()+p.slice(1)+'</option>').join('')+
+              '</select>'+
+            '</div>'+
+          '</div>'
+        : '';
+      return '<div style="margin-bottom:10px;padding:12px;border:1px solid #E6E6EE;border-radius:10px;background:#FAFAFC;">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-weight:600;font-size:12.5px;color:#1F2152;">'+escapeHtml(r.name)+(r.isMeasure?'':' <span style="color:#9094AD;font-weight:400;font-size:11px;">(dimension)</span>')+'</span><button id="fsRemove'+i+'" title="Remove" style="border:none;background:none;color:#9094AD;font-size:16px;cursor:pointer;line-height:1;">\u00D7</button></div>'+
+        '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">'+
+          colorMini('fsText'+i,'Text Color', r.textColor)+colorMini('fsBg'+i,'Background', r.bgColor)+
+          '<div><label style="display:block;font-size:10px;color:#9094AD;margin-bottom:3px;">Font Size</label><input type="number" id="fsSize'+i+'" min="8" max="24" value="'+(r.fontSize||'')+'" placeholder="default" style="width:64px;font-size:12px;padding:5px 6px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;"></div>'+
+          '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#1F2152;cursor:pointer;padding-bottom:6px;"><input type="checkbox" id="fsBold'+i+'" '+(r.bold?'checked':'')+'> Bold</label>'+
+          '<div><label style="display:block;font-size:10px;color:#9094AD;margin-bottom:3px;">Align</label><select id="fsAlign'+i+'" style="font-size:12px;padding:5px 6px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;"><option value="">Default</option><option value="left" '+(r.align==='left'?'selected':'')+'>Left</option><option value="center" '+(r.align==='center'?'selected':'')+'>Center</option><option value="right" '+(r.align==='right'?'selected':'')+'>Right</option></select></div>'+
+        '</div>'+
+        trendHeatmap+
+      '</div>';
+    }
+    function wireFormatTab(){
+      const gmap = [
+        ['fmtHeaderText','headerTextColor','value'],['fmtHeaderBg','headerBgColor','value'],['fmtTableBg','tableBgColor','value'],['fmtBorderColor','borderColor','value'],
+        ['fmtBoldHeaders','boldHeaders','checked'],['fmtBoldDims','boldDimensions','checked'],
+        ['fmtFontFamily','fontFamily','value'],['fmtAlign','align','value'],['fmtFontSize','fontSize','intvalue'],
+        ['fmtZebra','zebraStriping','checked'],['fmtZebraColor','zebraColor','value']
+      ];
+      gmap.forEach(([id,key,kind])=>{
+        const el = document.getElementById(id); if(!el) return;
+        const evt = (el.type==='checkbox'||el.tagName==='SELECT') ? 'change' : 'input';
+        el.addEventListener(evt, ()=>{
+          if(kind==='checked') formatState[key] = el.checked;
+          else if(kind==='intvalue') formatState[key] = el.value ? parseInt(el.value,10) : '';
+          else formatState[key] = el.value;
+        });
+      });
+      const resetBtn = document.getElementById('fmtResetAll');
+      if(resetBtn) resetBtn.addEventListener('click', ()=>{
+        if(!window.confirm('Reset all Format settings to default? This clears global styling and every field-specific override.')) return;
+        Object.keys(formatState).forEach(k=>{ formatState[k] = (typeof formatState[k]==='boolean') ? false : ''; });
+        formatState.zebraColor = '#FAFAFC';
+        fieldStyleRows.length = 0;
+        renderTabPanel();
+      });
+      const addBtn = document.getElementById('fmtAddFieldBtn');
+      if(addBtn) addBtn.addEventListener('click', ()=>{
+        const sel = document.getElementById('fmtAddFieldSelect');
+        const name = sel.value;
+        if(!name) return;
+        fieldStyleRows.push({ name, isMeasure: measureFieldNames.includes(name), textColor:'', bgColor:'', fontSize:'', bold:false, align:'',
+          trendEnabled:false, trendPos:'#0E9E84', trendNeg:'#C2255C', trendNeu:'#9094AD', heatmapEnabled:false, heatmapPalette:'purple' });
+        renderTabPanel();
+      });
+      fieldStyleRows.forEach((r,i)=>{
+        const bindRow = (id,key,kind) => {
+          const el = document.getElementById(id); if(!el) return;
+          const evt = (el.type==='checkbox'||el.tagName==='SELECT') ? 'change' : 'input';
+          el.addEventListener(evt, ()=>{
+            if(kind==='checked') r[key] = el.checked;
+            else if(kind==='intvalue') r[key] = el.value ? parseInt(el.value,10) : '';
+            else r[key] = el.value;
+          });
+        };
+        bindRow('fsText'+i,'textColor','value'); bindRow('fsBg'+i,'bgColor','value'); bindRow('fsSize'+i,'fontSize','intvalue');
+        bindRow('fsBold'+i,'bold','checked'); bindRow('fsAlign'+i,'align','value');
+        if(r.isMeasure){
+          bindRow('fsTrendEnabled'+i,'trendEnabled','checked'); bindRow('fsTrendPos'+i,'trendPos','value'); bindRow('fsTrendNeg'+i,'trendNeg','value'); bindRow('fsTrendNeu'+i,'trendNeu','value');
+          bindRow('fsHeatEnabled'+i,'heatmapEnabled','checked'); bindRow('fsHeatPalette'+i,'heatmapPalette','value');
+        }
+        const rm = document.getElementById('fsRemove'+i);
+        if(rm) rm.addEventListener('click', ()=>{ fieldStyleRows.splice(i,1); renderTabPanel(); });
+      });
+    }
+
     // ---- Shell: tab bar + active panel + Save/Cancel ----
     function renderTabPanel(){
       const panel = document.getElementById('cfgTabPanel');
@@ -16407,6 +16736,7 @@ window.tableau = __webpack_exports__;
       else if(activeTab==='filters'){ panel.innerHTML = filtersTabHtml(); renderFilterOrderList(); }
       else if(activeTab==='dimensions'){ panel.innerHTML = dimensionsTabHtml(); wireDimensionsTab(); }
       else if(activeTab==='measures'){ panel.innerHTML = measuresTabHtml(); wireMeasuresTab(); }
+      else if(activeTab==='format'){ panel.innerHTML = formatTabHtml(); wireFormatTab(); }
       else if(activeTab==='calc'){ panel.innerHTML = calcTabHtml(); wireCalcTab(); }
     }
     function onSave(){
@@ -16417,16 +16747,17 @@ window.tableau = __webpack_exports__;
         const expr = (r.expr||'').trim();
         if(!name && !expr) return;
         if(!name || !expr || !validateExprSyntax(expr, availableNames)){ hasError = true; return; }
-        cleanCalc.push({name, expr});
+        cleanCalc.push({name, expr, format:r.format||'number', decimals: r.decimals!=null?r.decimals:0, thousands: r.thousands!==false});
       });
       if(hasError){ activeTab='calc'; renderShell(); window.alert('Fix the highlighted rows in Calculated Fields before saving.'); return; }
 
-      // Merge each calculated field's Measures-tab settings (format/decimals/alias/visibility)
-      // back onto its definition before sending, matched by name.
+      // Alias and visibility come from the Measures tab; format/decimals/thousands come from
+      // the Calculated Fields tab itself (that's the authoritative source for those, matching
+      // where the formula is actually defined).
       const measureByName = {}; measureRows.forEach(r=>{ measureByName[r.name.toLowerCase()] = r; });
       const formulas = cleanCalc.map(c=>{
         const m = measureByName[c.name.toLowerCase()];
-        return { name:c.name, expr:c.expr, alias: m?m.alias:'', format: m?m.format:'number', decimals: m?m.decimals:2, thousands: m?m.thousands:true,
+        return { name:c.name, expr:c.expr, alias: m?m.alias:'', format: c.format, decimals: c.decimals, thousands: c.thousands,
           hiddenFromColumns: m?!m.showInColumns:false, hiddenFromTable: m?!m.showInTable:false };
       });
 
@@ -16440,13 +16771,30 @@ window.tableau = __webpack_exports__;
         measureOverrides[r.name] = { alias: r.alias||undefined, format:r.format, decimals:r.decimals, thousands:r.thousands, hiddenFromColumns: !r.showInColumns, hiddenFromTable: !r.showInTable };
       });
 
+      const tableFormatOut = {};
+      Object.keys(formatState).forEach(k=>{ if(formatState[k]!=='' && formatState[k]!==false) tableFormatOut[k] = formatState[k]; });
+      const fieldStyleOut = {};
+      fieldStyleRows.forEach(r=>{
+        const ov = {};
+        if(r.textColor) ov.textColor = r.textColor;
+        if(r.bgColor) ov.bgColor = r.bgColor;
+        if(r.fontSize) ov.fontSize = r.fontSize;
+        if(r.bold) ov.bold = true;
+        if(r.align) ov.align = r.align;
+        if(r.isMeasure && r.trendEnabled) ov.trend = {enabled:true, positiveColor:r.trendPos, negativeColor:r.trendNeg, neutralColor:r.trendNeu};
+        if(r.isMeasure && r.heatmapEnabled) ov.heatmap = {enabled:true, palette:r.heatmapPalette};
+        if(Object.keys(ov).length) fieldStyleOut[r.name] = ov;
+      });
+
       tableau.extensions.ui.closeDialog(JSON.stringify({
         cancelled:false, formulas:formulas,
         generalSettings: generalState,
         filtersOrder: filterOrderList.map(r=>r.name),
         filtersHidden: filterOrderList.filter(r=>!r.visible).map(r=>r.name),
         dimOverrides: dimOverrides,
-        measureOverrides: measureOverrides
+        measureOverrides: measureOverrides,
+        tableFormat: tableFormatOut,
+        fieldStyleOverrides: fieldStyleOut
       }));
     }
     function renderShell(){
