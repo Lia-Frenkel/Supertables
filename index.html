@@ -38,11 +38,32 @@
   .dr-field select:focus, .dr-field input[type=date]:focus{outline:none;border-color:var(--accent);}
   .dr-field input[type=date]:disabled{opacity:.55;background:#F4F4F8;}
   .dr-field label.dr-check{display:flex;align-items:center;gap:6px;font-size:12.5px;text-transform:none;letter-spacing:normal;font-weight:400;color:var(--ink-soft);padding-bottom:8px;cursor:pointer;white-space:nowrap;}
-  .chart-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12.5px;color:var(--ink-soft);white-space:nowrap;}
-  .chart-check input{cursor:pointer;accent-color:var(--accent);flex:none;}
-  .chart-field{flex:none;width:170px;}
-  .chart-field select, .chart-field input{width:100%;box-sizing:border-box;}
   .dr-check input{cursor:pointer;accent-color:var(--accent);}
+
+  .modal label.chart-check{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);padding:6px 6px;margin:0;border-radius:8px;}
+  .chart-check:hover{background:var(--paper);}
+  .chart-check input{cursor:pointer;accent-color:var(--accent);flex:none;width:15px;height:15px;}
+  .chart-modal-v2{width:820px;height:600px;min-width:560px;min-height:460px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;resize:both;overflow:hidden;padding:0;}
+  .chart-modal-v2 .chart-head{display:flex;justify-content:space-between;align-items:flex-start;padding:16px 18px 0;flex:none;}
+  .chart-modal-v2 .chart-head h3{margin:0;}
+  .chart-modal-v2 p.hint{padding:0 18px;margin:4px 0 10px;}
+  .chart-body{display:flex;flex:1;min-height:0;border-top:1px solid var(--line);}
+  .chart-rail{width:230px;flex:none;overflow-y:auto;padding:14px 14px 14px;border-right:1px solid var(--line);background:var(--paper);}
+  .chart-section{margin-bottom:16px;}
+  .chart-section-title{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;color:var(--ink-faint);margin:0 0 8px;}
+  .chart-rail label{margin:8px 0 4px;}
+  .chart-rail label:first-child{margin-top:0;}
+  .chart-preview{flex:1;min-width:0;display:flex;padding:14px;gap:12px;}
+  .chart-canvas-wrap{flex:1;min-width:0;position:relative;min-height:250px;}
+  .chart-legend-panel{width:170px;flex:none;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;}
+  .chart-legend-title{font-size:11.5px;font-weight:600;color:var(--ink);padding:9px 10px 7px;border-bottom:1px solid var(--line);flex:none;}
+  .chart-legend-scroll{overflow-y:auto;padding:6px 4px;}
+  .chart-legend-item{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;font-size:12px;color:var(--ink);}
+  .chart-legend-item:hover{background:var(--paper);}
+  .chart-legend-item input[type=color]{width:14px;height:14px;flex:none;padding:0;border:none;border-radius:3px;cursor:pointer;background:none;}
+  .chart-legend-item span.lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .chart-threshold-card{padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff;}
+  .chart-modal-v2 .actions{padding:12px 18px;margin:0;border-top:1px solid var(--line);flex:none;}
 
   .toolbar{display:flex;align-items:center;gap:7px;padding:9px 10px;flex-wrap:wrap;}
   .toolbar .divider{width:1px;align-self:stretch;background:var(--line);margin:0 2px;}
@@ -15561,78 +15582,98 @@ window.tableau = __webpack_exports__;
     let defaultType = 'bar';
     if(defaultX==='__period') defaultType='line'; else if(preview.labels.length<=5) defaultType='pie';
     const PALETTE = ['#7F69F6','#1F2152','#1CC8DB','#E3A008','#F2741B','#EC4899','#0E9E84','#3B6FE2'];
-    // Per-series-value color overrides, set by clicking a legend swatch. Keyed by series label
-    // so it survives redraws within this modal session (reset each time the modal is reopened).
-    let seriesColorOverrides = {};
+    // Per-legend-item color overrides (series value, or pie slice label), keyed by label text.
+    // Reset each time the modal opens; persists across redraws within one session.
+    let colorOverrides = {};
 
     const layer = document.getElementById('modalLayer');
     layer.innerHTML =
-      '<div class="modal-backdrop" id="chartBackdrop"><div class="modal chart-modal" style="width:760px;height:700px;display:flex;flex-direction:column;resize:both;overflow:hidden;min-width:420px;min-height:500px;max-width:95vw;max-height:92vh;">'+
-        '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex:none;">'+
-          '<h3 style="margin:0;">Create Chart</h3>'+
+      '<div class="modal-backdrop" id="chartBackdrop"><div class="modal chart-modal-v2">'+
+        '<div class="chart-head">'+
+          '<h3>Create Chart</h3>'+
           '<button class="btn" id="chartExport" style="font-size:12px;padding:5px 10px;">\u2913 Export PNG</button>'+
         '</div>'+
-        '<p class="hint" style="flex:none;">'+(state.selected.size>0 ? 'Based on '+rows.length+' selected row'+(rows.length===1?'':'s') : 'Based on all '+rows.length+' visible rows (nothing selected)')+' \u2014 drag the bottom-right corner to resize.</p>'+
+        '<p class="hint">'+(state.selected.size>0 ? 'Based on '+rows.length+' selected row'+(rows.length===1?'':'s') : 'Based on all '+rows.length+' visible rows (nothing selected)')+' \u2014 drag the corner to resize.</p>'+
+        '<div class="chart-body">'+
 
-        '<div class="chart-controls-scroll" style="overflow-y:auto;flex:0 1 auto;padding-right:4px;">'+
+          '<div class="chart-rail">'+
+            '<div class="chart-section">'+
+              '<div class="chart-section-title">Chart Type</div>'+
+              '<select id="chartType">'+
+                ['bar','line','area','pie','scatter'].map(t=>'<option value="'+t+'" '+(t===defaultType?'selected':'')+'>'+(t==='area'?'Area':t.charAt(0).toUpperCase()+t.slice(1))+'</option>').join('')+
+              '</select>'+
+            '</div>'+
 
-          '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
-            '<div class="chart-field"><label>Chart Title</label><input type="text" id="chartTitle" placeholder="(none)"></div>'+
-            '<div class="chart-field"><label>Subtitle</label><input type="text" id="chartSubtitle" placeholder="(none)"></div>'+
+            '<div class="chart-section">'+
+              '<div class="chart-section-title">Data</div>'+
+              '<div id="chartDimWrap"><label>X-Axis</label><select id="chartDim">'+
+                dimOptions.map(d=>'<option value="'+d+'" '+(d===defaultX?'selected':'')+'>'+escapeHtml(selectorLabel(d))+'</option>').join('')+
+              '</select></div>'+
+              '<div id="chartMeasureWrap"><label>Y-Axis</label><select id="chartMeasure">'+
+                measureOptions.map(m=>'<option value="'+m+'" '+(m===defaultMeasure?'selected':'')+'>'+escapeHtml(labelForValue(m))+'</option>').join('')+
+              '</select></div>'+
+              '<div id="chartMeasure2Wrap" class="hidden"><label>Y-Axis (2nd measure)</label><select id="chartMeasure2">'+
+                measureOptions.map((m,i)=>'<option value="'+m+'" '+(i===1?'selected':'')+'>'+escapeHtml(labelForValue(m))+'</option>').join('')+
+              '</select></div>'+
+              '<div id="chartSeriesWrap"><label>Split By</label><select id="chartSeries">'+
+                '<option value="">(none)</option>'+
+                dimOptions.map(d=>'<option value="'+d+'">'+escapeHtml(selectorLabel(d))+'</option>').join('')+
+              '</select></div>'+
+            '</div>'+
+
+            '<div class="chart-section" id="chartSeriesStyleSection">'+
+              '<div class="chart-section-title">Series Style</div>'+
+              '<label>Display</label><select id="chartSeriesMode">'+
+                '<option value="regular">Regular (Grouped)</option>'+
+                '<option value="stacked">Stacked</option>'+
+                '<option value="percent">100% Stacked</option>'+
+              '</select>'+
+              '<label>Legend Position</label><select id="chartLegendPos">'+
+                '<option value="right">Right</option>'+
+                '<option value="left">Left</option>'+
+              '</select>'+
+              '<label>Legend Title</label><input type="text" id="chartLegendTitle" placeholder="e.g. Platform">'+
+              '<label class="chart-check" style="margin-top:6px;"><input type="checkbox" id="chartShowLegendTitle" checked> Show legend title</label>'+
+            '</div>'+
+
+            '<div class="chart-section">'+
+              '<div class="chart-section-title">Titles</div>'+
+              '<label>Chart Title</label><input type="text" id="chartTitle" placeholder="(none)">'+
+              '<label>Subtitle</label><input type="text" id="chartSubtitle" placeholder="(none)">'+
+            '</div>'+
+
+            '<div class="chart-section">'+
+              '<div class="chart-section-title">Axis Labels</div>'+
+              '<label class="chart-check"><input type="checkbox" id="chartShowXLabel" checked> Show X-Axis label</label>'+
+              '<label class="chart-check"><input type="checkbox" id="chartShowYLabel" checked> Show Y-Axis label</label>'+
+            '</div>'+
+
+            '<div class="chart-section" id="chartThresholdCard">'+
+              '<div class="chart-section-title">Threshold</div>'+
+              '<div class="chart-threshold-card">'+
+                '<label class="chart-check" style="margin:0;padding:0;font-weight:600;color:#1F2152;"><input type="checkbox" id="chartThresholdEnabled"> Threshold line</label>'+
+                '<div id="chartThresholdFields" class="hidden" style="margin-top:8px;">'+
+                  '<label>Value</label><input type="number" id="chartThresholdValue" placeholder="e.g. 100">'+
+                  '<label>Label</label><input type="text" id="chartThresholdLabel" placeholder="e.g. Target">'+
+                  '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;">'+
+                    '<span style="font-size:12px;color:var(--ink-soft);">Color</span>'+
+                    '<input type="color" id="chartThresholdColor" value="#C2255C" style="width:32px;height:26px;border:1px solid var(--line);border-radius:6px;padding:2px;cursor:pointer;">'+
+                  '</div>'+
+                '</div>'+
+              '</div>'+
+            '</div>'+
           '</div>'+
 
-          '<div style="margin-top:10px;"><div class="chart-field"><label>Chart Type</label><select id="chartType">'+
-            ['bar','line','area','pie','scatter'].map(t=>'<option value="'+t+'" '+(t===defaultType?'selected':'')+'>'+(t==='area'?'Area':t.charAt(0).toUpperCase()+t.slice(1))+'</option>').join('')+
-          '</select></div></div>'+
-
-          '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'+
-            '<div class="chart-field" id="chartDimWrap"><label>X-Axis</label><select id="chartDim">'+
-              dimOptions.map(d=>'<option value="'+d+'" '+(d===defaultX?'selected':'')+'>'+escapeHtml(selectorLabel(d))+'</option>').join('')+
-            '</select></div>'+
-            '<div class="chart-field" id="chartMeasureWrap"><label>Y-Axis</label><select id="chartMeasure">'+
-              measureOptions.map(m=>'<option value="'+m+'" '+(m===defaultMeasure?'selected':'')+'>'+escapeHtml(labelForValue(m))+'</option>').join('')+
-            '</select></div>'+
-            '<div class="chart-field" id="chartSeriesWrap"><label>Split By</label><select id="chartSeries">'+
-              '<option value="">(none)</option>'+
-              dimOptions.map(d=>'<option value="'+d+'">'+escapeHtml(selectorLabel(d))+'</option>').join('')+
-            '</select></div>'+
-          '</div>'+
-          '<div id="chartMeasure2Wrap" class="hidden" style="margin-top:10px;"><div class="chart-field"><label>Y-Axis (2nd measure)</label><select id="chartMeasure2">'+
-            measureOptions.map((m,i)=>'<option value="'+m+'" '+(i===1?'selected':'')+'>'+escapeHtml(labelForValue(m))+'</option>').join('')+
-          '</select></div></div>'+
-
-          '<div id="chartSeriesStyleRow" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'+
-            '<div class="chart-field"><label>Series Display</label><select id="chartSeriesMode">'+
-              '<option value="regular">Regular (Grouped)</option>'+
-              '<option value="stacked">Stacked</option>'+
-              '<option value="percent">100% Stacked</option>'+
-            '</select></div>'+
-            '<div class="chart-field"><label>Legend Position</label><select id="chartLegendPos">'+
-              '<option value="right">Right</option>'+
-              '<option value="left">Left</option>'+
-            '</select></div>'+
-            '<div class="chart-field"><label>Legend Title</label><input type="text" id="chartLegendTitle" placeholder="e.g. Platform"></div>'+
-            '<label class="chart-check" style="align-self:center;"><input type="checkbox" id="chartShowLegendTitle" checked> Show Legend Title</label>'+
-          '</div>'+
-
-          '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:14px;">'+
-            '<label class="chart-check"><input type="checkbox" id="chartShowXLabel" checked> Show X-Axis Label</label>'+
-            '<label class="chart-check"><input type="checkbox" id="chartShowYLabel" checked> Show Y-Axis Label</label>'+
-          '</div>'+
-
-          '<div id="chartThresholdCard" style="margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#FAFAFC;">'+
-            '<label class="chart-check" style="font-weight:600;color:#1F2152;"><input type="checkbox" id="chartThresholdEnabled"> Threshold Line</label>'+
-            '<div id="chartThresholdFields" class="hidden" style="display:flex;gap:8px;align-items:flex-end;margin-top:10px;flex-wrap:wrap;">'+
-              '<div class="chart-field" style="width:130px;"><label>Value</label><input type="number" id="chartThresholdValue" placeholder="e.g. 100"></div>'+
-              '<div class="chart-field" style="width:150px;"><label>Label</label><input type="text" id="chartThresholdLabel" placeholder="e.g. Target"></div>'+
-              '<div><label style="display:block;font-size:10px;color:#9094AD;margin-bottom:3px;">Color</label><input type="color" id="chartThresholdColor" value="#C2255C" style="width:40px;height:32px;border:1px solid var(--line);border-radius:6px;padding:2px;cursor:pointer;"></div>'+
+          '<div class="chart-preview" id="chartPreview">'+
+            '<div class="chart-canvas-wrap"><canvas id="chartCanvas"></canvas></div>'+
+            '<div class="chart-legend-panel hidden" id="chartLegendPanel">'+
+              '<div class="chart-legend-title hidden" id="chartLegendTitleBar"></div>'+
+              '<div class="chart-legend-scroll" id="chartLegendScroll"></div>'+
             '</div>'+
           '</div>'+
 
         '</div>'+
-
-        '<div style="margin-top:12px;flex:1 0 250px;min-height:250px;position:relative;"><canvas id="chartCanvas"></canvas></div>'+
-        '<div class="actions" style="flex:none;"><button class="btn" id="chartClose">Close</button></div>'+
+        '<div class="actions"><button class="btn" id="chartClose">Close</button></div>'+
       '</div></div>';
 
     function currentConfig(){
@@ -15656,38 +15697,48 @@ window.tableau = __webpack_exports__;
         thresholdColor: document.getElementById('chartThresholdColor').value
       };
     }
-    // Normalizes each dataset's values so every X position sums to 100 — used for "100% Stacked".
     function toPercentStacked(rawDatasets){
       const n = rawDatasets[0] ? rawDatasets[0].values.length : 0;
       const totals = [];
       for(let i=0;i<n;i++){ let sum=0; rawDatasets.forEach(ds=>{ sum += (ds.values[i]||0); }); totals.push(sum); }
       return rawDatasets.map(ds=>({ label:ds.label, values: ds.values.map((v,i)=> totals[i] ? (v/totals[i])*100 : 0) }));
     }
-    // Opens a native color picker anchored near the click, applying the chosen color to that
-    // one series and redrawing — this is what makes legend swatches editable.
-    function pickColorFor(label, currentHex, clientX, clientY){
-      const input = document.createElement('input');
-      input.type = 'color';
-      input.value = currentHex;
-      input.style.position = 'fixed';
-      input.style.left = clientX+'px';
-      input.style.top = clientY+'px';
-      input.style.opacity = '0';
-      input.style.width = '1px';
-      input.style.height = '1px';
-      document.body.appendChild(input);
-      input.addEventListener('input', ()=>{ seriesColorOverrides[label] = input.value; draw(); });
-      input.addEventListener('change', ()=>{ if(input.parentNode) document.body.removeChild(input); });
-      input.click();
+    // Renders the legend as real HTML (not Chart.js's canvas-drawn legend) so it can scroll
+    // independently, sit flush with the top of the chart, and never get clipped — including
+    // in the exported PNG, which composes the complete list regardless of scroll position.
+    function renderLegendPanel(items, legendTitleText, showTitle, legendPos){
+      const panel = document.getElementById('chartLegendPanel');
+      const preview = document.getElementById('chartPreview');
+      const canvasWrap = document.getElementById('chartCanvasWrap') || document.querySelector('.chart-canvas-wrap');
+      if(!items || items.length===0){ panel.classList.add('hidden'); return; }
+      panel.classList.remove('hidden');
+      preview.style.flexDirection = legendPos==='left' ? 'row-reverse' : 'row';
+      const titleBar = document.getElementById('chartLegendTitleBar');
+      titleBar.classList.toggle('hidden', !(showTitle && legendTitleText));
+      titleBar.textContent = legendTitleText;
+      const scroll = document.getElementById('chartLegendScroll');
+      scroll.innerHTML = items.map((it,i)=>
+        '<div class="chart-legend-item">'+
+          '<input type="color" data-idx="'+i+'" value="'+it.color+'">'+
+          '<span class="lbl" title="'+escapeAttr(it.label)+'">'+escapeHtml(it.label)+'</span>'+
+        '</div>'
+      ).join('');
+      scroll.querySelectorAll('input[type=color]').forEach(inp=>{
+        inp.addEventListener('input', ()=>{
+          const it = items[parseInt(inp.getAttribute('data-idx'),10)];
+          colorOverrides[it.label] = inp.value;
+          draw();
+        });
+      });
     }
     function draw(){
       const cfg = currentConfig();
       const supportsSplit = (cfg.type==='bar'||cfg.type==='line'||cfg.type==='area');
       document.getElementById('chartMeasure2Wrap').classList.toggle('hidden', cfg.type!=='scatter');
-      document.getElementById('chartDimWrap').style.visibility = cfg.type==='scatter' ? 'hidden' : 'visible';
-      document.getElementById('chartSeriesWrap').style.visibility = supportsSplit ? 'visible' : 'hidden';
+      document.getElementById('chartDimWrap').style.display = cfg.type==='scatter' ? 'none' : 'block';
+      document.getElementById('chartSeriesWrap').style.display = supportsSplit ? 'block' : 'none';
       const isMultiSeriesSelected = supportsSplit && !!cfg.series;
-      document.getElementById('chartSeriesStyleRow').style.display = isMultiSeriesSelected ? 'flex' : 'none';
+      document.getElementById('chartSeriesStyleSection').style.display = isMultiSeriesSelected ? 'block' : 'none';
       document.getElementById('chartThresholdCard').style.display = (cfg.type==='bar'||cfg.type==='line'||cfg.type==='area') ? 'block' : 'none';
       document.getElementById('chartThresholdFields').classList.toggle('hidden', !cfg.thresholdEnabled);
 
@@ -15697,10 +15748,12 @@ window.tableau = __webpack_exports__;
 
       const titlePlugins = {
         title: { display: !!cfg.title, text: cfg.title, font:{size:15,weight:'600'}, color:'#1F2152', padding:{bottom: cfg.subtitle?2:10} },
-        subtitle: { display: !!cfg.subtitle, text: cfg.subtitle, font:{size:12,weight:'400'}, color:'#565A7E', padding:{bottom:10} }
+        subtitle: { display: !!cfg.subtitle, text: cfg.subtitle, font:{size:12,weight:'400'}, color:'#565A7E', padding:{bottom:10} },
+        legend: { display:false }
       };
 
       if(cfg.type==='scatter'){
+        document.getElementById('chartLegendPanel').classList.add('hidden');
         const fmtX = getFormatterFor(cfg.measure), fmtY = getFormatterFor(cfg.measure2);
         const points = srcRows.map(r=>({x:r[cfg.measure], y:r[cfg.measure2]}));
         chartInstance = new Chart(ctx, { type:'scatter',
@@ -15724,14 +15777,14 @@ window.tableau = __webpack_exports__;
       const displayDatasets = isPercent ? toPercentStacked(rawDatasets) : rawDatasets;
       const isArea = cfg.type==='area';
       const chartJsType = isArea ? 'line' : cfg.type;
+      const colorFor = (i, label) => colorOverrides[label] || PALETTE[i%PALETTE.length];
 
-      const colorFor = (i, label) => seriesColorOverrides[label] || PALETTE[i%PALETTE.length];
       const datasets = displayDatasets.map((ds,i)=>{
         const base = colorFor(i, ds.label);
         return {
           label: ds.label,
           data: ds.values,
-          backgroundColor: cfg.type==='pie' ? labels.map((_,j)=>PALETTE[j%PALETTE.length]) : (isArea ? base+'55' : base),
+          backgroundColor: cfg.type==='pie' ? labels.map((lbl,j)=>colorFor(j,lbl)) : (isArea ? base+'55' : base),
           borderColor: (cfg.type==='line'||isArea) ? base : undefined,
           fill: isArea ? (isStacked ? (i===0?'origin':'-1') : true) : (cfg.type==='line' ? false : undefined)
         };
@@ -15743,26 +15796,10 @@ window.tableau = __webpack_exports__;
         return ' '+prefix+(isPercent ? raw.toFixed(1)+'%' : fmt(raw));
       };
 
-      const legendConfig = {
-        display: cfg.type==='pie' || isMultiSeries,
-        position: (cfg.type==='pie'||!isMultiSeries) ? 'top' : cfg.legendPos,
-        align: 'start',
-        labels: { boxWidth:12, boxHeight:12, usePointStyle:false },
-        title: { display: isMultiSeries && cfg.showLegendTitle && !!cfg.legendTitle, text: cfg.legendTitle, font:{size:12,weight:'600'}, color:'#1F2152' }
-      };
-      if(isMultiSeries){
-        legendConfig.onClick = (e, legendItem)=>{
-          const i = legendItem.datasetIndex;
-          const label = displayDatasets[i] ? displayDatasets[i].label : legendItem.text;
-          pickColorFor(label, colorFor(i,label), e.native.clientX, e.native.clientY);
-        };
-      }
-
       chartInstance = new Chart(ctx, { type: chartJsType, data:{labels, datasets},
         plugins: [thresholdLinePlugin],
         options:{ responsive:true, maintainAspectRatio:false,
           plugins: Object.assign({}, titlePlugins, {
-            legend: legendConfig,
             tooltip:{ callbacks:{ label: tooltipLabel } },
             thresholdLine: { enabled: cfg.thresholdEnabled && !isPercent, value: cfg.thresholdValue, label: cfg.thresholdLabel, color: cfg.thresholdColor }
           }),
@@ -15773,8 +15810,15 @@ window.tableau = __webpack_exports__;
               ticks:{ callback: isPercent ? (v=>v+'%') : abbreviatedAxisFormatter(cfg.measure) } }
           } }
       });
+
+      if(cfg.type==='pie'){
+        renderLegendPanel(labels.map((lbl,i)=>({label:String(lbl), color:colorFor(i,lbl)})), cfg.legendTitle, cfg.showLegendTitle, cfg.legendPos);
+      } else if(isMultiSeries){
+        renderLegendPanel(displayDatasets.map((ds,i)=>({label:ds.label, color:colorFor(i,ds.label)})), cfg.legendTitle, cfg.showLegendTitle, cfg.legendPos);
+      } else {
+        document.getElementById('chartLegendPanel').classList.add('hidden');
+      }
     }
-    // Default the Legend Title field to the Split By field's own name once one is picked.
     document.getElementById('chartSeries').addEventListener('change', e=>{
       const titleEl = document.getElementById('chartLegendTitle');
       if(e.target.value && !titleEl.value) titleEl.value = selectorLabel(e.target.value);
@@ -15783,14 +15827,51 @@ window.tableau = __webpack_exports__;
       const el = document.getElementById(id);
       el.addEventListener(el.tagName==='SELECT'||el.type==='checkbox'||el.type==='color' ? 'change' : 'input', draw);
     });
+    // Export composes the chart canvas plus the COMPLETE legend list (not just what's
+    // currently scrolled into view) onto one offscreen canvas, so nothing is ever cropped.
     document.getElementById('chartExport').addEventListener('click', ()=>{
       if(!chartInstance) return;
-      const link = document.createElement('a');
-      link.download = 'chart.png';
-      link.href = chartInstance.toBase64Image();
-      link.click();
+      const chartCanvas = document.getElementById('chartCanvas');
+      const legendPanel = document.getElementById('chartLegendPanel');
+      const scroll = document.getElementById('chartLegendScroll');
+      const items = legendPanel.classList.contains('hidden') ? [] : Array.from(scroll.querySelectorAll('.chart-legend-item')).map(el=>({
+        label: el.querySelector('.lbl').textContent,
+        color: el.querySelector('input[type=color]').value
+      }));
+      if(items.length===0){
+        const link = document.createElement('a'); link.download='chart.png'; link.href = chartInstance.toBase64Image(); link.click();
+        return;
+      }
+      const scale = window.devicePixelRatio || 1;
+      const legendWidth = 190*scale, pad = 14*scale, itemH = 22*scale, swatch = 12*scale;
+      const cfg = currentConfig();
+      const showTitle = cfg.showLegendTitle && !!cfg.legendTitle;
+      const titleH = showTitle ? 24*scale : 0;
+      const legendContentH = pad*2 + titleH + items.length*itemH;
+      const totalH = Math.max(chartCanvas.height, legendContentH);
+      const totalW = chartCanvas.width + legendWidth;
+      const off = document.createElement('canvas');
+      off.width = totalW; off.height = totalH;
+      const octx = off.getContext('2d');
+      octx.fillStyle = '#ffffff'; octx.fillRect(0,0,totalW,totalH);
+      const chartX = cfg.legendPos==='left' ? legendWidth : 0;
+      const legendX = cfg.legendPos==='left' ? 0 : chartCanvas.width;
+      octx.drawImage(chartCanvas, chartX, 0);
+      let y = pad;
+      if(showTitle){
+        octx.fillStyle = '#1F2152'; octx.font = '600 '+(13*scale)+'px "Helvetica Neue",Helvetica,Arial,sans-serif';
+        octx.fillText(cfg.legendTitle, legendX+pad, y+11*scale);
+        y += titleH;
+      }
+      items.forEach(it=>{
+        octx.fillStyle = it.color; octx.fillRect(legendX+pad, y, swatch, swatch);
+        octx.fillStyle = '#1F2152'; octx.font = (12*scale)+'px "Helvetica Neue",Helvetica,Arial,sans-serif';
+        octx.fillText(it.label, legendX+pad+swatch+8*scale, y+swatch-1*scale);
+        y += itemH;
+      });
+      const link = document.createElement('a'); link.download='chart.png'; link.href = off.toDataURL('image/png'); link.click();
     });
-    const modalEl = layer.querySelector('.chart-modal');
+    const modalEl = layer.querySelector('.chart-modal-v2');
     let chartResizeObserver = null;
     if(window.ResizeObserver){
       chartResizeObserver = new ResizeObserver(()=>{ if(chartInstance) chartInstance.resize(); });
@@ -15805,6 +15886,7 @@ window.tableau = __webpack_exports__;
     document.getElementById('chartClose').addEventListener('click', teardown);
     draw();
   }
+
 
 
 
