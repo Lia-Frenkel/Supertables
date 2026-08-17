@@ -15470,11 +15470,78 @@ window.tableau = __webpack_exports__;
     if(state.selected.size>0) return {groupByArr, rows: rows.filter(r=>state.selected.has(rowKey(r, groupByArr)))};
     return {groupByArr, rows};
   }
+  function chartCellValue(r, dimId){ return dimId==='__period' ? r.periodLabel : r[dimId]; }
   function aggregateForChart(rows, dimId, measureId){
     const map = new Map();
-    for(const r of rows){ const k = dimId==='__period' ? r.periodLabel : r[dimId]; map.set(k, (map.get(k)||0)+(r[measureId]||0)); }
+    for(const r of rows){ const k = chartCellValue(r, dimId); map.set(k, (map.get(k)||0)+(r[measureId]||0)); }
     return {labels:Array.from(map.keys()), values:Array.from(map.values())};
   }
+  // Supports an optional series/split-by dimension, producing one dataset per series value
+  // instead of one flat series — this is what powers "split by color/series" in the chart builder.
+  function aggregateForChartMulti(rows, xDimId, measureId, seriesDimId){
+    if(!seriesDimId){
+      const {labels, values} = aggregateForChart(rows, xDimId, measureId);
+      return {labels, datasets:[{label:labelForValue(measureId), values}]};
+    }
+    const xOrder = [], seriesOrder = [];
+    const xSeen = new Set(), seriesSeen = new Set();
+    const cellMap = new Map();
+    for(const r of rows){
+      const x = chartCellValue(r, xDimId), s = String(chartCellValue(r, seriesDimId));
+      if(!xSeen.has(x)){ xSeen.add(x); xOrder.push(x); }
+      if(!seriesSeen.has(s)){ seriesSeen.add(s); seriesOrder.push(s); }
+      const key = x+'\u241E'+s;
+      cellMap.set(key, (cellMap.get(key)||0) + (r[measureId]||0));
+    }
+    const datasets = seriesOrder.map(s=>({ label:s, values: xOrder.map(x=> cellMap.get(x+'\u241E'+s) || 0) }));
+    return {labels:xOrder, datasets};
+  }
+  // Axis-tick-only abbreviation (1.2K / 3.4M / 5.6B) — tooltips still use the full table-matching
+  // formatter; this is purely so dense axes don't get cluttered with long numbers.
+  function abbreviateNumber(v){
+    const abs = Math.abs(v);
+    if(abs>=1e9) return (v/1e9).toFixed(1).replace(/\.0$/,'')+'B';
+    if(abs>=1e6) return (v/1e6).toFixed(1).replace(/\.0$/,'')+'M';
+    if(abs>=1e3) return (v/1e3).toFixed(1).replace(/\.0$/,'')+'K';
+    return String(Math.round(v*100)/100);
+  }
+  function abbreviatedAxisFormatter(measureId){
+    const vc = state.valueColumns.find(c=>c.id===measureId);
+    const format = vc ? vc.format : 'number';
+    return function(v){
+      if(format==='percent') return (v*100).toFixed(0)+'%';
+      if(format==='currency') return CURRENCY_SYMBOL+abbreviateNumber(v*CURRENCY_EXCHANGE_RATE);
+      return abbreviateNumber(v);
+    };
+  }
+  // Self-contained threshold/reference-line renderer — a plain Chart.js plugin object rather
+  // than an external plugin library, so it works with just the core Chart.js already loaded.
+  const thresholdLinePlugin = {
+    id: 'thresholdLine',
+    afterDraw(chart, args, opts){
+      if(!opts || !opts.enabled || opts.value==null || isNaN(opts.value)) return;
+      const {ctx, chartArea, scales} = chart;
+      if(!scales.y) return;
+      const y = scales.y.getPixelForValue(opts.value);
+      if(y < chartArea.top || y > chartArea.bottom) return;
+      ctx.save();
+      ctx.strokeStyle = opts.color || '#C2255C';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6,4]);
+      ctx.beginPath();
+      ctx.moveTo(chartArea.left, y);
+      ctx.lineTo(chartArea.right, y);
+      ctx.stroke();
+      if(opts.label){
+        ctx.setLineDash([]);
+        ctx.fillStyle = opts.color || '#C2255C';
+        ctx.font = '600 11px "Helvetica Neue",Helvetica,Arial,sans-serif';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(opts.label, chartArea.left+4, y-3);
+      }
+      ctx.restore();
+    }
+  };
   document.getElementById('btnChart').addEventListener('click', openChartModal);
   function openChartModal(){
     if(state.pivot.active) return;
@@ -15484,69 +15551,151 @@ window.tableau = __webpack_exports__;
     if(dimOptions.length===0){ showToast('Group by at least one dimension first'); return; }
     const measureOptions = state.valueColumns.filter(c=>c.visible).map(c=>c.id);
     if(measureOptions.length===0){ showToast('Make at least one measure column visible first'); return; }
-    const defaultDim = dimOptions[0];
+    const defaultX = dimOptions[0];
     const defaultMeasure = measureOptions[0];
-    const preview = aggregateForChart(rows, defaultDim, defaultMeasure);
+    const preview = aggregateForChart(rows, defaultX, defaultMeasure);
     let defaultType = 'bar';
-    if(defaultDim==='__period') defaultType='line'; else if(preview.labels.length<=5) defaultType='pie';
+    if(defaultX==='__period') defaultType='line'; else if(preview.labels.length<=5) defaultType='pie';
+    const PALETTE = ['#7F69F6','#1F2152','#1CC8DB','#E3A008','#F2741B','#EC4899','#0E9E84','#3B6FE2'];
 
     const layer = document.getElementById('modalLayer');
     layer.innerHTML =
-      '<div class="modal-backdrop" id="chartBackdrop"><div class="modal" style="width:520px;">'+
-        '<h3>Create Chart</h3>'+
-        '<p class="hint">'+(state.selected.size>0 ? 'Based on '+rows.length+' selected row'+(rows.length===1?'':'s') : 'Based on all '+rows.length+' visible rows (nothing selected)')+'</p>'+
-        '<div style="display:flex;gap:8px;">'+
-          '<div style="flex:1;"><label>Chart Type</label><select id="chartType">'+
+      '<div class="modal-backdrop" id="chartBackdrop"><div class="modal chart-modal" style="width:640px;display:flex;flex-direction:column;resize:both;overflow:auto;min-width:480px;min-height:460px;max-width:95vw;max-height:92vh;">'+
+        '<div style="display:flex;justify-content:space-between;align-items:flex-start;">'+
+          '<h3 style="margin:0;">Create Chart</h3>'+
+          '<button class="btn" id="chartExport" style="font-size:12px;padding:5px 10px;">\u2913 Export PNG</button>'+
+        '</div>'+
+        '<p class="hint">'+(state.selected.size>0 ? 'Based on '+rows.length+' selected row'+(rows.length===1?'':'s') : 'Based on all '+rows.length+' visible rows (nothing selected)')+' \u2014 drag the bottom-right corner to resize.</p>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
+          '<div style="flex:1;min-width:110px;"><label>Chart Type</label><select id="chartType">'+
             ['bar','line','pie','scatter'].map(t=>'<option value="'+t+'" '+(t===defaultType?'selected':'')+'>'+t.charAt(0).toUpperCase()+t.slice(1)+'</option>').join('')+
           '</select></div>'+
-          '<div style="flex:1;" id="chartDimWrap"><label>Dimension</label><select id="chartDim">'+
-            dimOptions.map(d=>'<option value="'+d+'" '+(d===defaultDim?'selected':'')+'>'+escapeHtml(selectorLabel(d))+'</option>').join('')+
+          '<div style="flex:1;min-width:110px;" id="chartDimWrap"><label>X-Axis Field</label><select id="chartDim">'+
+            dimOptions.map(d=>'<option value="'+d+'" '+(d===defaultX?'selected':'')+'>'+escapeHtml(selectorLabel(d))+'</option>').join('')+
+          '</select></div>'+
+          '<div style="flex:1;min-width:110px;" id="chartSeriesWrap"><label>Split By (optional)</label><select id="chartSeries">'+
+            '<option value="">(none)</option>'+
+            dimOptions.map(d=>'<option value="'+d+'">'+escapeHtml(selectorLabel(d))+'</option>').join('')+
           '</select></div>'+
         '</div>'+
-        '<div id="chartMeasureWrap"><label>Measure</label><select id="chartMeasure">'+
+        '<div id="chartMeasureWrap"><label>Y-Axis Field</label><select id="chartMeasure">'+
           measureOptions.map(m=>'<option value="'+m+'" '+(m===defaultMeasure?'selected':'')+'>'+escapeHtml(labelForValue(m))+'</option>').join('')+
         '</select></div>'+
-        '<div id="chartMeasure2Wrap" class="hidden"><label>Y Measure</label><select id="chartMeasure2">'+
+        '<div id="chartMeasure2Wrap" class="hidden"><label>Y-Axis Field (2nd measure)</label><select id="chartMeasure2">'+
           measureOptions.map((m,i)=>'<option value="'+m+'" '+(i===1?'selected':'')+'>'+escapeHtml(labelForValue(m))+'</option>').join('')+
         '</select></div>'+
-        '<div style="margin-top:14px;height:260px;"><canvas id="chartCanvas"></canvas></div>'+
+        '<div style="display:flex;gap:8px;">'+
+          '<div style="flex:1;"><label>Chart Title</label><input type="text" id="chartTitle" placeholder="(none)"></div>'+
+          '<div style="flex:1;"><label>Subtitle</label><input type="text" id="chartSubtitle" placeholder="(none)"></div>'+
+        '</div>'+
+        '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:6px;">'+
+          '<label class="dr-check" style="padding-bottom:0;"><input type="checkbox" id="chartShowXLabel" checked> Show X-Axis Label</label>'+
+          '<label class="dr-check" style="padding-bottom:0;"><input type="checkbox" id="chartShowYLabel" checked> Show Y-Axis Label</label>'+
+        '</div>'+
+        '<div id="chartThresholdRow" style="display:flex;gap:8px;align-items:flex-end;margin-top:6px;">'+
+          '<label class="dr-check" style="padding-bottom:8px;"><input type="checkbox" id="chartThresholdEnabled"> Threshold line</label>'+
+          '<div style="flex:1;"><label>Value</label><input type="number" id="chartThresholdValue" placeholder="e.g. 100"></div>'+
+          '<div style="flex:1;"><label>Label</label><input type="text" id="chartThresholdLabel" placeholder="e.g. Target"></div>'+
+        '</div>'+
+        '<div style="margin-top:14px;flex:1;min-height:200px;position:relative;"><canvas id="chartCanvas"></canvas></div>'+
         '<div class="actions"><button class="btn" id="chartClose">Close</button></div>'+
       '</div></div>';
 
     function currentConfig(){
-      return { type: document.getElementById('chartType').value, dim: document.getElementById('chartDim').value,
-        measure: document.getElementById('chartMeasure').value, measure2: document.getElementById('chartMeasure2').value };
+      return {
+        type: document.getElementById('chartType').value,
+        dim: document.getElementById('chartDim').value,
+        series: document.getElementById('chartSeries').value,
+        measure: document.getElementById('chartMeasure').value,
+        measure2: document.getElementById('chartMeasure2').value,
+        title: document.getElementById('chartTitle').value.trim(),
+        subtitle: document.getElementById('chartSubtitle').value.trim(),
+        showXLabel: document.getElementById('chartShowXLabel').checked,
+        showYLabel: document.getElementById('chartShowYLabel').checked,
+        thresholdEnabled: document.getElementById('chartThresholdEnabled').checked,
+        thresholdValue: parseFloat(document.getElementById('chartThresholdValue').value),
+        thresholdLabel: document.getElementById('chartThresholdLabel').value.trim()
+      };
     }
     function draw(){
       const cfg = currentConfig();
       document.getElementById('chartMeasure2Wrap').classList.toggle('hidden', cfg.type!=='scatter');
       document.getElementById('chartDimWrap').style.visibility = cfg.type==='scatter' ? 'hidden' : 'visible';
+      document.getElementById('chartSeriesWrap').style.visibility = (cfg.type==='scatter'||cfg.type==='pie') ? 'hidden' : 'visible';
+      document.getElementById('chartThresholdRow').style.display = (cfg.type==='bar'||cfg.type==='line') ? 'flex' : 'none';
       const {rows: srcRows} = getChartSourceRows();
       const ctx = document.getElementById('chartCanvas').getContext('2d');
       if(chartInstance) chartInstance.destroy();
-      const palette = ['#7F69F6','#1F2152','#1CC8DB','#E3A008','#F2741B','#EC4899','#0E9E84','#3B6FE2'];
+
+      const titlePlugins = {
+        title: { display: !!cfg.title, text: cfg.title, font:{size:15,weight:'600'}, color:'#1F2152', padding:{bottom: cfg.subtitle?2:10} },
+        subtitle: { display: !!cfg.subtitle, text: cfg.subtitle, font:{size:12,weight:'400'}, color:'#565A7E', padding:{bottom:10} }
+      };
+
       if(cfg.type==='scatter'){
+        const fmtX = getFormatterFor(cfg.measure), fmtY = getFormatterFor(cfg.measure2);
         const points = srcRows.map(r=>({x:r[cfg.measure], y:r[cfg.measure2]}));
         chartInstance = new Chart(ctx, { type:'scatter',
-          data:{datasets:[{label:labelForValue(cfg.measure)+' vs '+labelForValue(cfg.measure2), data:points, backgroundColor:palette[0]}]},
-          options:{responsive:true, maintainAspectRatio:false, scales:{x:{title:{display:true,text:labelForValue(cfg.measure)}}, y:{title:{display:true,text:labelForValue(cfg.measure2)}}}}
+          data:{datasets:[{label:labelForValue(cfg.measure)+' vs '+labelForValue(cfg.measure2), data:points, backgroundColor:PALETTE[0]}]},
+          options:{responsive:true, maintainAspectRatio:false,
+            plugins: Object.assign({}, titlePlugins, { tooltip:{ callbacks:{ label:c=>' x: '+fmtX(c.parsed.x)+', y: '+fmtY(c.parsed.y) } } }),
+            scales:{
+              x:{ title:{display:cfg.showXLabel,text:labelForValue(cfg.measure)}, ticks:{callback:abbreviatedAxisFormatter(cfg.measure)} },
+              y:{ title:{display:cfg.showYLabel,text:labelForValue(cfg.measure2)}, ticks:{callback:abbreviatedAxisFormatter(cfg.measure2)} }
+            }
+          }
         });
         return;
       }
-      const {labels, values} = aggregateForChart(srcRows, cfg.dim, cfg.measure);
+
+      const {labels, datasets: rawDatasets} = aggregateForChartMulti(srcRows, cfg.dim, cfg.measure, cfg.series||null);
       const fmt = getFormatterFor(cfg.measure);
-      const dataset = { label: labelForValue(cfg.measure), data: values,
-        backgroundColor: cfg.type==='pie' ? labels.map((_,i)=>palette[i%palette.length]) : palette[0],
-        borderColor: cfg.type==='line' ? palette[0] : undefined, fill: cfg.type==='line' ? false : undefined };
-      chartInstance = new Chart(ctx, { type: cfg.type, data:{labels, datasets:[dataset]},
+      const isMultiSeries = rawDatasets.length>1;
+      const datasets = rawDatasets.map((ds,i)=>({
+        label: ds.label,
+        data: ds.values,
+        backgroundColor: cfg.type==='pie' ? labels.map((_,j)=>PALETTE[j%PALETTE.length]) : PALETTE[i%PALETTE.length],
+        borderColor: cfg.type==='line' ? PALETTE[i%PALETTE.length] : undefined,
+        fill: cfg.type==='line' ? false : undefined
+      }));
+      chartInstance = new Chart(ctx, { type: cfg.type, data:{labels, datasets},
+        plugins: [thresholdLinePlugin],
         options:{ responsive:true, maintainAspectRatio:false,
-          plugins:{ tooltip:{ callbacks:{ label: c=> ' '+fmt(c.parsed.y!==undefined?c.parsed.y:c.parsed) } } },
-          scales: cfg.type==='pie' ? {} : { y:{ ticks:{ callback:v=>fmt(v) } } } }
+          plugins: Object.assign({}, titlePlugins, {
+            legend: { display: cfg.type==='pie' || isMultiSeries },
+            tooltip:{ callbacks:{ label: c=> ' '+(isMultiSeries||cfg.type==='pie' ? c.dataset.label+': ' : '')+fmt(c.parsed.y!==undefined?c.parsed.y:c.parsed) } },
+            thresholdLine: { enabled: cfg.thresholdEnabled, value: cfg.thresholdValue, label: cfg.thresholdLabel, color:'#C2255C' }
+          }),
+          scales: cfg.type==='pie' ? {} : {
+            x: { title:{display:cfg.showXLabel, text:selectorLabel(cfg.dim)} },
+            y: { title:{display:cfg.showYLabel, text:labelForValue(cfg.measure)}, ticks:{ callback:abbreviatedAxisFormatter(cfg.measure) } }
+          } }
       });
     }
-    ['chartType','chartDim','chartMeasure','chartMeasure2'].forEach(id=> document.getElementById(id).addEventListener('change', draw));
-    document.getElementById('chartBackdrop').addEventListener('click', e=>{ if(e.target.id==='chartBackdrop'){ if(chartInstance) chartInstance.destroy(); layer.innerHTML=''; } });
-    document.getElementById('chartClose').addEventListener('click', ()=>{ if(chartInstance) chartInstance.destroy(); layer.innerHTML=''; });
+    ['chartType','chartDim','chartSeries','chartMeasure','chartMeasure2','chartTitle','chartSubtitle','chartShowXLabel','chartShowYLabel','chartThresholdEnabled','chartThresholdValue','chartThresholdLabel'].forEach(id=>{
+      const el = document.getElementById(id);
+      el.addEventListener(el.tagName==='SELECT'||el.type==='checkbox' ? 'change' : 'input', draw);
+    });
+    document.getElementById('chartExport').addEventListener('click', ()=>{
+      if(!chartInstance) return;
+      const link = document.createElement('a');
+      link.download = 'chart.png';
+      link.href = chartInstance.toBase64Image();
+      link.click();
+    });
+    const modalEl = layer.querySelector('.chart-modal');
+    let chartResizeObserver = null;
+    if(window.ResizeObserver){
+      chartResizeObserver = new ResizeObserver(()=>{ if(chartInstance) chartInstance.resize(); });
+      chartResizeObserver.observe(modalEl);
+    }
+    function teardown(){
+      if(chartInstance){ chartInstance.destroy(); chartInstance=null; }
+      if(chartResizeObserver) chartResizeObserver.disconnect();
+      layer.innerHTML = '';
+    }
+    document.getElementById('chartBackdrop').addEventListener('click', e=>{ if(e.target.id==='chartBackdrop') teardown(); });
+    document.getElementById('chartClose').addEventListener('click', teardown);
     draw();
   }
 
