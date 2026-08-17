@@ -90,6 +90,7 @@
   table{border-collapse:separate;border-spacing:0;table-layout:fixed;width:100%;}
   thead{position:sticky;top:0;z-index:5;}
   th,td{border-bottom:1px solid var(--line);border-right:1px solid #F0F0F5;padding:0;vertical-align:top;}
+  thead th{background:#FAFAFC;}
   th:last-child,td:last-child{border-right:none;}
 
   .th-inner{position:relative;height:100%;box-sizing:border-box;padding:8px 9px 7px 9px;display:flex;align-items:flex-start;gap:6px;background:#FAFAFC;user-select:none;cursor:grab;}
@@ -14490,7 +14491,7 @@ window.tableau = __webpack_exports__;
     const t = TABLE_FORMAT || {};
     let css = '';
     if(t.tableBgColor) css += '.table-shell, tbody td{background:'+t.tableBgColor+';}\n';
-    if(t.headerBgColor) css += '.th-inner{background:'+t.headerBgColor+';}\n';
+    if(t.headerBgColor) css += 'thead th, .th-inner{background:'+t.headerBgColor+';}\n';
     if(t.headerTextColor) css += '.th-label{color:'+t.headerTextColor+';}\n';
     if(t.boldHeaders) css += '.th-label{font-weight:700;}\n';
     if(t.boldDimensions) css += 'td.dimcell{font-weight:700;}\n';
