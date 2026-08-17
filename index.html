@@ -14300,7 +14300,7 @@ window.tableau = __webpack_exports__;
   let SHOW_LAST_N_PERIODS = 14;
   let FILTERS_ORDER = [];
   let FILTERS_HIDDEN = [];
-  let DIM_OVERRIDES = {'__period':{hiddenFromTable:true, hiddenFromColumns:true}}; // key: bare name, or '__period' -> {alias, hiddenFromColumns, hiddenFromTable}
+  let DIM_OVERRIDES = {'__period':{hiddenFromTable:true}}; // key: bare name, or '__period' -> {alias, hiddenFromColumns, hiddenFromTable}
   let MEASURE_FORMAT_OVERRIDES = {}; // bare measure name -> {alias, format, decimals, thousands, hiddenFromColumns, hiddenFromTable}
   let TABLE_FORMAT = {}; // global visual settings; empty/missing keys fall back to the built-in Violet defaults
   let FIELD_STYLE_OVERRIDES = {}; // bare field name (dim or measure) -> {textColor,bgColor,fontSize,bold,align,trend,heatmap}
@@ -15208,7 +15208,7 @@ window.tableau = __webpack_exports__;
 
   document.getElementById('btnColumns').addEventListener('click', function(){
     const html = '<div class="p-title">Dimensions</div>'+
-      DIM_ORDER.filter(d=>d!=='__period' && !dimOverrideFor(d).hiddenFromColumns).map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(state.groupBy.has(d)?'checked':'')+'> '+escapeHtml(selectorLabel(d))+'</label>').join('')+
+      DIM_ORDER.filter(d=>!dimOverrideFor(d).hiddenFromColumns).map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(state.groupBy.has(d)?'checked':'')+'> '+escapeHtml(selectorLabel(d))+'</label>').join('')+
       '<div class="p-title">Measures</div>'+
       state.valueColumns.filter(c=>!c.columnsListHidden).map(c=>'<label><input type="checkbox" data-role="colval" data-col="'+c.id+'" '+(c.visible?'checked':'')+'> '+escapeHtml(c.label)+(c.kind!=='measure'?' <span style="color:var(--ink-faint);font-size:10px;">('+c.kind+')</span>':'')+'</label>').join('');
     const div = openPopover(this, html);
@@ -16290,14 +16290,15 @@ window.tableau = __webpack_exports__;
       showLastNPeriods: gs.showLastNPeriods || 14
     };
 
-    // ---- Dimensions rows. Dynamic Date is deliberately NOT listed here — it's hard-excluded
-    // from the Columns button and the main table everywhere, not just hidden by default, so
-    // there's nothing to configure for it. Pivot View's own Row/Column Grouping still offers it,
-    // since that's a separate, explicit feature. ----
+    // ---- Dimensions rows, including Dynamic Date (managed the same as any other dimension). ----
     let dimRows = fieldRows.filter(f=>f.current==='dimension').map(f=>{
       const ov = dimOv[f.bare] || {};
       return { fieldName:f.fieldName, bare:f.bare, alias: ov.alias||'', showInColumns: !ov.hiddenFromColumns, showInTable: !ov.hiddenFromTable };
     });
+    if(hasDateField){
+      const ov = dimOv['__period'] || {};
+      dimRows.unshift({ fieldName:'__period', bare:'Dynamic Date', alias: ov.alias||'', showInColumns: !ov.hiddenFromColumns, showInTable: !ov.hiddenFromTable });
+    }
 
     // ---- Measure rows: native fields + existing calculated fields, same columns for both ----
     let measureRows = fieldRows.filter(f=>f.current==='measure').map(f=>{
