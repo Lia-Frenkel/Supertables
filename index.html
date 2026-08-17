@@ -14769,7 +14769,6 @@ window.tableau = __webpack_exports__;
   ============================================================ */
   function render(){
     if(DATE_FIELD_ID) DIM_META['__period'].label = periodDimLabel(state.dateRange.timeframe);
-    persistLayoutSilently();
     renderDateRangeBar();
 
     if(state.pivot.active){ updateModeUI(); renderPivotView(); return; }
@@ -15051,11 +15050,12 @@ window.tableau = __webpack_exports__;
           document.removeEventListener('mousemove', onMove);
           document.removeEventListener('mouseup', onUp);
           render();
+          persistLayoutSilently();
         }
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
       });
-      resizer.addEventListener('dblclick', e=>{ e.stopPropagation(); resetColWidth(colId); render(); });
+      resizer.addEventListener('dblclick', e=>{ e.stopPropagation(); resetColWidth(colId); render(); persistLayoutSilently(); });
       th.querySelector('[data-role="menu"]').addEventListener('click', e=>{ e.stopPropagation(); openColumnMenu(e.currentTarget, colId); });
 
       // Click anywhere on the header to sort; drag anywhere on it (past a small movement
@@ -15104,6 +15104,7 @@ window.tableau = __webpack_exports__;
             if(dropInfo){
               reorderColumnBefore(draggedId, dropInfo.insertBeforeId);
               render();
+              persistLayoutSilently();
             }
           } else {
             if(state.sort.colId!==colId){ state.sort = {colId, dir:1}; }
@@ -15111,6 +15112,7 @@ window.tableau = __webpack_exports__;
             else if(state.sort.dir===-1){ state.sort={colId:null,dir:0}; }
             else { state.sort={colId,dir:1}; }
             render();
+            persistLayoutSilently();
           }
         }
         document.addEventListener('mousemove', onMove);
@@ -15216,10 +15218,11 @@ window.tableau = __webpack_exports__;
         if(cb.checked) state.groupBy.add(d); else state.groupBy.delete(d);
         if(state.groupBy.size===0){ state.groupBy.add(d); cb.checked=true; }
         render();
+        persistLayoutSilently();
       });
     });
     div.querySelectorAll('[data-role="colval"]').forEach(cb=>{
-      cb.addEventListener('change', ()=>{ const col = state.valueColumns.find(c=>c.id===cb.getAttribute('data-col')); col.visible = cb.checked; render(); });
+      cb.addEventListener('change', ()=>{ const col = state.valueColumns.find(c=>c.id===cb.getAttribute('data-col')); col.visible = cb.checked; render(); persistLayoutSilently(); });
     });
   });
 
@@ -15277,7 +15280,7 @@ window.tableau = __webpack_exports__;
           state.valueColumns = state.valueColumns.filter(c=>c.id!==colId);
           state.columnOrder = state.columnOrder.filter(id=>id!==colId);
         }
-        closePopover(); render();
+        closePopover(); render(); persistLayoutSilently();
       });
     });
   }
@@ -15789,6 +15792,7 @@ window.tableau = __webpack_exports__;
     }catch(e){ /* no saved layout yet, or it didn't parse — just use the computed default */ }
   }
   let _layoutSaveTimer = null;
+  let _lastSavedLayoutJson = null;
   function persistLayoutSilently(){
     if(!IS_AUTHORING || !state) return;
     clearTimeout(_layoutSaveTimer);
@@ -15800,9 +15804,12 @@ window.tableau = __webpack_exports__;
         groupBy: Array.from(state.groupBy),
         sort: state.sort
       };
-      tableau.extensions.settings.set('supertableLayout', JSON.stringify(payload));
+      const json = JSON.stringify(payload);
+      if(json === _lastSavedLayoutJson) return; // nothing actually changed — don't touch settings at all
+      _lastSavedLayoutJson = json;
+      tableau.extensions.settings.set('supertableLayout', json);
       tableau.extensions.settings.saveAsync().catch(err=>console.warn('Layout autosave failed:', err));
-    }, 800);
+    }, 1500);
   }
 
   function loadSavedDefaults(){
