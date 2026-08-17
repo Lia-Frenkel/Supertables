@@ -16,9 +16,9 @@
     font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;
   }
   *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);height:100%;}
+  html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);height:100%;overflow:hidden;}
   body{-webkit-font-smoothing:antialiased;}
-  .app{max-width:1440px;margin:0 auto;padding:14px 14px 24px;}
+  .app{max-width:1440px;margin:0 auto;padding:14px 14px 14px;height:100vh;box-sizing:border-box;display:flex;flex-direction:column;}
 
   .masthead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;}
   .masthead h1{font-size:17px;font-weight:600;letter-spacing:-0.01em;margin:0;display:flex;align-items:center;gap:8px;}
@@ -28,17 +28,16 @@
   .cfgbtn{font-weight:500;font-size:11.5px;color:var(--ink-soft);background:var(--surface);border:1px solid var(--line);padding:5px 10px;border-radius:var(--radius-ctrl);cursor:pointer;}
   .cfgbtn:hover{border-color:var(--line-strong);color:var(--ink);}
 
-  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 1px 2px rgba(31,33,82,.05);}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 1px 2px rgba(31,33,82,.05);flex:none;}
 
-  .daterange-bar{display:flex;align-items:flex-end;gap:14px;padding:10px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .daterange-bar{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;padding:10px 12px;border-bottom:1px solid var(--line);align-items:end;}
   .daterange-bar.hidden{display:none;}
-  .dr-field{display:flex;flex-direction:column;gap:4px;}
+  .dr-field{display:flex;flex-direction:column;gap:4px;min-width:0;}
   .dr-field label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;color:var(--ink-faint);}
   .dr-field select, .dr-field input[type=date]{height:34px;box-sizing:border-box;font-size:12.5px;padding:0 8px;border:1px solid var(--line);border-radius:var(--radius-ctrl);background:#fff;color:var(--ink);min-width:140px;}
   .dr-field select:focus, .dr-field input[type=date]:focus{outline:none;border-color:var(--accent);}
   .dr-field input[type=date]:disabled{opacity:.55;background:#F4F4F8;}
-  .dr-arrow{color:var(--ink-faint);padding-bottom:8px;font-size:13px;}
-  .dr-check{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);padding-bottom:8px;cursor:pointer;white-space:nowrap;}
+  .dr-field label.dr-check{display:flex;align-items:center;gap:6px;font-size:12.5px;text-transform:none;letter-spacing:normal;font-weight:400;color:var(--ink-soft);padding-bottom:8px;cursor:pointer;white-space:nowrap;}
   .dr-check input{cursor:pointer;accent-color:var(--accent);}
 
   .toolbar{display:flex;align-items:center;gap:7px;padding:9px 10px;flex-wrap:wrap;}
@@ -48,6 +47,8 @@
   .search svg{flex:none;opacity:.55;}
   .btn{display:inline-flex;align-items:center;gap:5px;height:34px;box-sizing:border-box;font-weight:500;font-size:12.5px;color:var(--ink);background:#fff;border:1px solid var(--line);padding:0 11px;border-radius:var(--radius-ctrl);cursor:pointer;white-space:nowrap;transition:border-color .12s,background .12s;}
   .btn:hover{border-color:var(--line-strong);background:#FAFAFB;}
+  .btn-tool{background:#F0F0F5;border-color:#E0E0EA;}
+  .btn-tool:hover{background:#E6E6EF;border-color:#D6D6E4;}
   .btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
   .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
   .btn.primary:hover{background:var(--accent-ink);border-color:var(--accent-ink);}
@@ -59,13 +60,13 @@
   .spacer{flex:1;}
   .sel-count{font-size:11.5px;color:var(--ink-soft);margin-right:2px;}
 
-  .topfilters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 20px;padding:12px 16px;border-bottom:1px solid var(--line);}
-  .tf-btn{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;min-width:150px;height:34px;box-sizing:border-box;font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:0 10px;cursor:pointer;color:var(--ink);font-family:inherit;}
+  .topfilters{position:relative;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;padding:12px 150px 12px 16px;border-bottom:1px solid var(--line);align-items:end;}
+  .tf-btn{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;width:100%;height:34px;box-sizing:border-box;font-size:12.5px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:0 10px;cursor:pointer;color:var(--ink);font-family:inherit;}
   .tf-btn span.tf-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .tf-btn:hover{background:#FAFAFB;}
   .tf-btn.tf-active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink);}
   .tf-caret{display:inline-flex;flex:none;color:var(--ink-faint);}
-  .tf-reset{flex:none;margin-left:auto;align-self:flex-end;height:34px;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;background:none;color:var(--accent-ink);font-size:12px;font-weight:600;padding:0 12px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+  .tf-reset{position:absolute;top:14px;right:16px;height:34px;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;background:none;color:var(--accent-ink);font-size:12px;font-weight:600;padding:0 12px;cursor:pointer;font-family:inherit;white-space:nowrap;}
   .tf-reset:hover{background:var(--accent-soft);}
   .tf-popup-search{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:12px;font-family:inherit;color:var(--ink);outline:none;margin-bottom:6px;}
   .tf-popup-search:focus{border-color:var(--accent);}
@@ -85,7 +86,7 @@
   .pipeline .arrow{color:var(--line-strong);margin:0 9px;}
   .pipeline .step.empty .v{color:var(--ink-faint);font-weight:400;}
 
-  .table-shell{margin-top:12px;overflow:auto;flex:1;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);position:relative;box-shadow:0 1px 2px rgba(31,33,82,.05);}
+  .table-shell{margin-top:12px;overflow:auto;flex:1;min-height:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);position:relative;box-shadow:0 1px 2px rgba(31,33,82,.05);}
   table{border-collapse:separate;border-spacing:0;table-layout:fixed;width:100%;}
   thead{position:sticky;top:0;z-index:5;}
   th,td{border-bottom:1px solid var(--line);border-right:1px solid #F0F0F5;padding:0;}
@@ -189,10 +190,10 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input type="text" id="searchInput" placeholder="Search table…">
       </div>
-      <button class="btn" id="btnColumns">Columns</button>
-      <button class="btn" id="btnPivot">Pivot View</button>
+      <button class="btn btn-tool" id="btnColumns">Columns</button>
+      <button class="btn btn-tool" id="btnPivot">Pivot View</button>
       <button class="btn warnish hidden" id="btnExitPivot">✕ Exit Pivot</button>
-      <button class="btn" id="btnFormula">ƒ Formula</button>
+      <button class="btn btn-tool" id="btnFormula">ƒ Formula</button>
       <div class="divider"></div>
       <div class="spacer"></div>
       <span class="sel-count" id="selCount"></span>
@@ -14494,10 +14495,12 @@ window.tableau = __webpack_exports__;
     if(t.boldHeaders) css += '.th-label{font-weight:700;}\n';
     if(t.boldDimensions) css += 'td.dimcell{font-weight:700;}\n';
     if(t.fontFamily) css += '.app, .th-label, tbody td, .dr-field, .tf-btn{font-family:'+t.fontFamily+';}\n';
-    if(t.align) css += '.th-label-wrap{justify-content:'+({left:'flex-start',center:'center',right:'flex-end'}[t.align]||'flex-start')+';} td.dimcell{text-align:'+ALIGN_CSS[t.align]+';}\n';
+    if(t.align) css += '.th-label-wrap{justify-content:'+({left:'flex-start',center:'center',right:'flex-end'}[t.align]||'flex-start')+';} td.dimcell{text-align:'+ALIGN_CSS[t.align]+';} td.num{text-align:'+ALIGN_CSS[t.align]+';}\n';
     if(t.fontSize) css += 'tbody td{font-size:'+t.fontSize+'px;} .th-label{font-size:'+Math.max(9,t.fontSize-1)+'px;}\n';
     if(t.zebraStriping) css += 'tbody tr:nth-child(even) td{background:'+(t.zebraColor||'#FAFAFC')+';}\n';
     if(t.borderColor) css += 'th,td{border-color:'+t.borderColor+';}\n';
+    if(t.headerRowHeight) css += '.th-inner{min-height:'+t.headerRowHeight+'px;}\n';
+    if(t.dataRowHeight) css += 'tbody td{height:'+t.dataRowHeight+'px;box-sizing:border-box;}\n';
 
     // Field-specific overrides: color/background/size/bold/align, targeted by data-colid so they
     // travel correctly with a column regardless of reordering.
@@ -14538,12 +14541,12 @@ window.tableau = __webpack_exports__;
     return lerpColor(pair[0], pair[1], t);
   }
   function trendArrowHtml(delta, trendCfg){
-    const posColor = (trendCfg&&trendCfg.positiveColor) || '#0E9E84';
-    const negColor = (trendCfg&&trendCfg.negativeColor) || '#C2255C';
+    const incColor = (trendCfg&&trendCfg.increaseColor) || '#0E9E84';
+    const decColor = (trendCfg&&trendCfg.decreaseColor) || '#C2255C';
     const neuColor = (trendCfg&&trendCfg.neutralColor) || '#9094AD';
     if(delta==null) return ' <span style="color:'+neuColor+';font-size:10px;">\u25AC</span>';
-    if(delta>0) return ' <span style="color:'+posColor+';font-size:10px;">\u25B2</span>';
-    if(delta<0) return ' <span style="color:'+negColor+';font-size:10px;">\u25BC</span>';
+    if(delta>0) return ' <span style="color:'+incColor+';font-size:10px;">\u25B2</span>';
+    if(delta<0) return ' <span style="color:'+decColor+';font-size:10px;">\u25BC</span>';
     return ' <span style="color:'+neuColor+';font-size:10px;">\u25AC</span>';
   }
 
@@ -14802,9 +14805,8 @@ window.tableau = __webpack_exports__;
         TIMEFRAME_OPTIONS.map(o=>'<option value="'+o.id+'" '+(o.id===dr.timeframe?'selected':'')+'>'+o.label+'</option>').join('')+
       '</select></div>'+
       '<div class="dr-field"><label>Start Date</label><input type="date" id="startDateInput" min="'+DATA_BOUNDS.min+'" max="'+DATA_BOUNDS.max+'" value="'+dr.start+'" '+(isTrailing?'disabled':'')+'></div>'+
-      '<span class="dr-arrow">\u2192</span>'+
       '<div class="dr-field"><label>End Date</label><input type="date" id="endDateInput" min="'+DATA_BOUNDS.min+'" max="'+DATA_BOUNDS.max+'" value="'+dr.end+'"></div>'+
-      '<label class="dr-check"><input type="checkbox" id="hideIncompleteChk" '+(dr.hideIncomplete?'checked':'')+'> Hide incomplete period</label>';
+      '<div class="dr-field"><label>&nbsp;</label><label class="dr-check"><input type="checkbox" id="hideIncompleteChk" '+(dr.hideIncomplete?'checked':'')+'> Hide incomplete period</label></div>';
 
     document.getElementById('tfSelect').addEventListener('change', e=>{
       state.dateRange.timeframe = e.target.value;
@@ -15204,7 +15206,7 @@ window.tableau = __webpack_exports__;
 
   document.getElementById('btnColumns').addEventListener('click', function(){
     const html = '<div class="p-title">Dimensions</div>'+
-      DIM_ORDER.filter(d=>!dimOverrideFor(d).hiddenFromColumns).map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(state.groupBy.has(d)?'checked':'')+'> '+escapeHtml(selectorLabel(d))+'</label>').join('')+
+      DIM_ORDER.filter(d=>d!=='__period' && !dimOverrideFor(d).hiddenFromColumns).map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(state.groupBy.has(d)?'checked':'')+'> '+escapeHtml(selectorLabel(d))+'</label>').join('')+
       '<div class="p-title">Measures</div>'+
       state.valueColumns.filter(c=>!c.columnsListHidden).map(c=>'<label><input type="checkbox" data-role="colval" data-col="'+c.id+'" '+(c.visible?'checked':'')+'> '+escapeHtml(c.label)+(c.kind!=='measure'?' <span style="color:var(--ink-faint);font-size:10px;">('+c.kind+')</span>':'')+'</label>').join('');
     const div = openPopover(this, html);
@@ -16262,14 +16264,14 @@ window.tableau = __webpack_exports__;
 
     const formatState = Object.assign({
       headerTextColor:'', headerBgColor:'', tableBgColor:'', boldHeaders:false, boldDimensions:false,
-      fontFamily:'', align:'', fontSize:'', zebraStriping:false, zebraColor:'#FAFAFC', borderColor:''
+      fontFamily:'', align:'', fontSize:'', zebraStriping:false, zebraColor:'#FAFAFC', borderColor:'', headerRowHeight:'', dataRowHeight:''
     }, initial.tableFormat||{});
     let fieldStyleRows = Object.keys(initial.fieldStyleOverrides||{}).map(name=>{
       const ov = initial.fieldStyleOverrides[name] || {};
       const t = ov.trend||{}, h = ov.heatmap||{};
       return { name, isMeasure: measureFieldNames.includes(name),
         textColor: ov.textColor||'', bgColor: ov.bgColor||'', fontSize: ov.fontSize||'', bold: !!ov.bold, align: ov.align||'',
-        trendEnabled: !!t.enabled, trendPos: t.positiveColor||'#0E9E84', trendNeg: t.negativeColor||'#C2255C', trendNeu: t.neutralColor||'#9094AD',
+        trendEnabled: !!t.enabled, trendInc: t.increaseColor||'#0E9E84', trendDec: t.decreaseColor||'#C2255C', trendNeu: t.neutralColor||'#9094AD',
         heatmapEnabled: !!h.enabled, heatmapPalette: h.palette||'purple' };
     });
 
@@ -16281,15 +16283,14 @@ window.tableau = __webpack_exports__;
       showLastNPeriods: gs.showLastNPeriods || 14
     };
 
-    // ---- Dimensions rows (Dynamic Date is just another row here, no special-casing) ----
+    // ---- Dimensions rows. Dynamic Date is deliberately NOT listed here — it's hard-excluded
+    // from the Columns button and the main table everywhere, not just hidden by default, so
+    // there's nothing to configure for it. Pivot View's own Row/Column Grouping still offers it,
+    // since that's a separate, explicit feature. ----
     let dimRows = fieldRows.filter(f=>f.current==='dimension').map(f=>{
       const ov = dimOv[f.bare] || {};
       return { fieldName:f.fieldName, bare:f.bare, alias: ov.alias||'', showInColumns: !ov.hiddenFromColumns, showInTable: !ov.hiddenFromTable };
     });
-    if(hasDateField){
-      const ov = dimOv['__period'] || {};
-      dimRows.unshift({ fieldName:'__period', bare:'Dynamic Date', alias: ov.alias||'', showInColumns: !ov.hiddenFromColumns, showInTable: !ov.hiddenFromTable });
-    }
 
     // ---- Measure rows: native fields + existing calculated fields, same columns for both ----
     let measureRows = fieldRows.filter(f=>f.current==='measure').map(f=>{
@@ -16619,7 +16620,7 @@ window.tableau = __webpack_exports__;
     function formatTabHtml(){
       return '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Format</h3>'+
         '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Nothing here is required \u2014 leave a control at its default to keep the current look. The existing design is always the fallback.</p>'+
-        '<div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><button id="fmtResetAll" style="font-size:12px;font-weight:600;color:#C2255C;background:#FBE0EA;border:1px solid #FBE0EA;border-radius:8px;padding:6px 12px;cursor:pointer;font-family:inherit;">Reset to Default</button></div>'+
+        '<div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><button id="fmtResetGeneral" style="font-size:12px;font-weight:600;color:#C2255C;background:#FBE0EA;border:1px solid #FBE0EA;border-radius:8px;padding:6px 12px;cursor:pointer;font-family:inherit;">Reset General Formatting</button></div>'+
         '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #E6E6EE;">'+
           colorMini('fmtHeaderText','Header Text Color', formatState.headerTextColor||'#9094AD')+
           colorMini('fmtHeaderBg','Header Background', formatState.headerBgColor||'#FAFAFC')+
@@ -16636,8 +16637,13 @@ window.tableau = __webpack_exports__;
           '<div><label style="display:block;font-size:10px;color:#9094AD;margin-bottom:3px;">Font Size (px)</label><input type="number" id="fmtFontSize" min="9" max="20" placeholder="default" value="'+(formatState.fontSize||'')+'" style="width:70px;font-size:12px;padding:5px 6px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;"></div>'+
           '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:#1F2152;cursor:pointer;padding-bottom:6px;"><input type="checkbox" id="fmtZebra" '+(formatState.zebraStriping?'checked':'')+'> Zebra Striping</label>'+
           colorMini('fmtZebraColor','Zebra Row Color', formatState.zebraColor)+
+          '<div><label style="display:block;font-size:10px;color:#9094AD;margin-bottom:3px;">Header Row Height (px)</label><input type="number" id="fmtHeaderRowHeight" min="24" max="80" placeholder="default" value="'+(formatState.headerRowHeight||'')+'" style="width:80px;font-size:12px;padding:5px 6px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;"></div>'+
+          '<div><label style="display:block;font-size:10px;color:#9094AD;margin-bottom:3px;">Data Row Height (px)</label><input type="number" id="fmtDataRowHeight" min="20" max="80" placeholder="default" value="'+(formatState.dataRowHeight||'')+'" style="width:80px;font-size:12px;padding:5px 6px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;"></div>'+
         '</div>'+
-        '<h3 style="margin:0 0 4px;font-size:13px;color:#1F2152;">Field-Specific Formatting</h3>'+
+        '<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px;">'+
+          '<h3 style="margin:0;font-size:13px;color:#1F2152;">Field-Specific Formatting</h3>'+
+          '<button id="fmtResetFields" style="font-size:11.5px;font-weight:600;color:#C2255C;background:#FBE0EA;border:1px solid #FBE0EA;border-radius:8px;padding:5px 10px;cursor:pointer;font-family:inherit;">Reset Field-Specific Formatting</button>'+
+        '</div>'+
         '<p style="margin:0 0 10px;font-size:12px;color:#565A7E;">Pick a dimension or measure to give it its own look. Measures also get a trend arrow and heatmap option.</p>'+
         '<div style="display:flex;gap:8px;margin-bottom:12px;">'+
           '<select id="fmtAddFieldSelect" style="flex:1;font-size:12.5px;padding:6px 8px;border:1px solid #E6E6EE;border-radius:6px;font-family:inherit;">'+
@@ -16653,7 +16659,7 @@ window.tableau = __webpack_exports__;
         ? '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed #E6E6EE;display:flex;gap:20px;flex-wrap:wrap;">'+
             '<div>'+
               '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#1F2152;cursor:pointer;margin-bottom:6px;"><input type="checkbox" id="fsTrendEnabled'+i+'" '+(r.trendEnabled?'checked':'')+'> Trend arrow (row-over-row change)</label>'+
-              '<div style="display:flex;gap:10px;">'+colorMini('fsTrendPos'+i,'Positive',r.trendPos)+colorMini('fsTrendNeg'+i,'Negative',r.trendNeg)+colorMini('fsTrendNeu'+i,'Neutral',r.trendNeu)+'</div>'+
+              '<div style="display:flex;gap:10px;">'+colorMini('fsTrendInc'+i,'Increase (\u25B2)',r.trendInc)+colorMini('fsTrendDec'+i,'Decrease (\u25BC)',r.trendDec)+colorMini('fsTrendNeu'+i,'No change',r.trendNeu)+'</div>'+
             '</div>'+
             '<div>'+
               '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#1F2152;cursor:pointer;margin-bottom:6px;"><input type="checkbox" id="fsHeatEnabled'+i+'" '+(r.heatmapEnabled?'checked':'')+'> Heatmap</label>'+
@@ -16679,7 +16685,8 @@ window.tableau = __webpack_exports__;
         ['fmtHeaderText','headerTextColor','value'],['fmtHeaderBg','headerBgColor','value'],['fmtTableBg','tableBgColor','value'],['fmtBorderColor','borderColor','value'],
         ['fmtBoldHeaders','boldHeaders','checked'],['fmtBoldDims','boldDimensions','checked'],
         ['fmtFontFamily','fontFamily','value'],['fmtAlign','align','value'],['fmtFontSize','fontSize','intvalue'],
-        ['fmtZebra','zebraStriping','checked'],['fmtZebraColor','zebraColor','value']
+        ['fmtZebra','zebraStriping','checked'],['fmtZebraColor','zebraColor','value'],
+        ['fmtHeaderRowHeight','headerRowHeight','intvalue'],['fmtDataRowHeight','dataRowHeight','intvalue']
       ];
       gmap.forEach(([id,key,kind])=>{
         const el = document.getElementById(id); if(!el) return;
@@ -16690,11 +16697,16 @@ window.tableau = __webpack_exports__;
           else formatState[key] = el.value;
         });
       });
-      const resetBtn = document.getElementById('fmtResetAll');
-      if(resetBtn) resetBtn.addEventListener('click', ()=>{
-        if(!window.confirm('Reset all Format settings to default? This clears global styling and every field-specific override.')) return;
+      const resetGeneralBtn = document.getElementById('fmtResetGeneral');
+      if(resetGeneralBtn) resetGeneralBtn.addEventListener('click', ()=>{
+        if(!window.confirm('Reset general table formatting to default? This does not affect field-specific formatting.')) return;
         Object.keys(formatState).forEach(k=>{ formatState[k] = (typeof formatState[k]==='boolean') ? false : ''; });
         formatState.zebraColor = '#FAFAFC';
+        renderTabPanel();
+      });
+      const resetFieldsBtn = document.getElementById('fmtResetFields');
+      if(resetFieldsBtn) resetFieldsBtn.addEventListener('click', ()=>{
+        if(!window.confirm('Remove all field-specific formatting? This does not affect the general table formatting.')) return;
         fieldStyleRows.length = 0;
         renderTabPanel();
       });
@@ -16704,7 +16716,7 @@ window.tableau = __webpack_exports__;
         const name = sel.value;
         if(!name) return;
         fieldStyleRows.push({ name, isMeasure: measureFieldNames.includes(name), textColor:'', bgColor:'', fontSize:'', bold:false, align:'',
-          trendEnabled:false, trendPos:'#0E9E84', trendNeg:'#C2255C', trendNeu:'#9094AD', heatmapEnabled:false, heatmapPalette:'purple' });
+          trendEnabled:false, trendInc:'#0E9E84', trendDec:'#C2255C', trendNeu:'#9094AD', heatmapEnabled:false, heatmapPalette:'purple' });
         renderTabPanel();
       });
       fieldStyleRows.forEach((r,i)=>{
@@ -16720,7 +16732,7 @@ window.tableau = __webpack_exports__;
         bindRow('fsText'+i,'textColor','value'); bindRow('fsBg'+i,'bgColor','value'); bindRow('fsSize'+i,'fontSize','intvalue');
         bindRow('fsBold'+i,'bold','checked'); bindRow('fsAlign'+i,'align','value');
         if(r.isMeasure){
-          bindRow('fsTrendEnabled'+i,'trendEnabled','checked'); bindRow('fsTrendPos'+i,'trendPos','value'); bindRow('fsTrendNeg'+i,'trendNeg','value'); bindRow('fsTrendNeu'+i,'trendNeu','value');
+          bindRow('fsTrendEnabled'+i,'trendEnabled','checked'); bindRow('fsTrendInc'+i,'trendInc','value'); bindRow('fsTrendDec'+i,'trendDec','value'); bindRow('fsTrendNeu'+i,'trendNeu','value');
           bindRow('fsHeatEnabled'+i,'heatmapEnabled','checked'); bindRow('fsHeatPalette'+i,'heatmapPalette','value');
         }
         const rm = document.getElementById('fsRemove'+i);
@@ -16781,7 +16793,7 @@ window.tableau = __webpack_exports__;
         if(r.fontSize) ov.fontSize = r.fontSize;
         if(r.bold) ov.bold = true;
         if(r.align) ov.align = r.align;
-        if(r.isMeasure && r.trendEnabled) ov.trend = {enabled:true, positiveColor:r.trendPos, negativeColor:r.trendNeg, neutralColor:r.trendNeu};
+        if(r.isMeasure && r.trendEnabled) ov.trend = {enabled:true, increaseColor:r.trendInc, decreaseColor:r.trendDec, neutralColor:r.trendNeu};
         if(r.isMeasure && r.heatmapEnabled) ov.heatmap = {enabled:true, palette:r.heatmapPalette};
         if(Object.keys(ov).length) fieldStyleOut[r.name] = ov;
       });
