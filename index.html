@@ -14397,7 +14397,7 @@ window.tableau = __webpack_exports__;
     // any additional ones fall through to the dimension list below instead of being dropped.
     const dateField = cols.find(c=> c.role==='date');
     const measures = cols.filter(c=> c.role==='measure');
-    const categoricalDims = cols.filter(c=> c!==dateField && c.role!=='measure' && c.role!=='exclude');
+    const categoricalDims = cols.filter(c=> c.role!=='date' && c.role!=='measure' && c.role!=='exclude');
 
     DATE_FIELD_ID = dateField ? dateField.id : null;
     DIM_META = {};
