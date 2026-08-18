@@ -40,18 +40,19 @@
   .dr-field label.dr-check{display:flex;align-items:center;gap:6px;font-size:12.5px;text-transform:none;letter-spacing:normal;font-weight:400;color:var(--ink-soft);padding-bottom:8px;cursor:pointer;white-space:nowrap;}
   .dr-check input{cursor:pointer;accent-color:var(--accent);}
 
-  .modal label.chart-check{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);padding:6px 6px;margin:0;border-radius:8px;}
+  .modal label.chart-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);padding:3px 2px;margin:0;border-radius:6px;}
   .chart-check:hover{background:var(--paper);}
-  .chart-check input{cursor:pointer;accent-color:var(--accent);flex:none;width:15px;height:15px;}
-  .chart-modal-v2{width:820px;height:600px;min-width:560px;min-height:460px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;resize:both;overflow:hidden;padding:0;}
-  .chart-modal-v2 .chart-head{display:flex;justify-content:space-between;align-items:flex-start;padding:16px 18px 0;flex:none;}
-  .chart-modal-v2 .chart-head h3{margin:0;}
-  .chart-modal-v2 p.hint{padding:0 18px;margin:4px 0 10px;}
+  .chart-check input{cursor:pointer;accent-color:var(--accent);flex:none;width:13px;height:13px;}
+  .chart-modal-v2{width:960px;height:620px;min-width:600px;min-height:460px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;resize:both;overflow:hidden;padding:0;}
+  .chart-modal-v2 .chart-head{display:flex;justify-content:space-between;align-items:flex-start;padding:14px 18px 0;flex:none;}
+  .chart-modal-v2 .chart-head h3{margin:0;font-size:14px;}
+  .chart-modal-v2 p.hint{padding:0 18px;margin:4px 0 10px;font-size:11px;}
   .chart-body{display:flex;flex:1;min-height:0;border-top:1px solid var(--line);}
-  .chart-rail{width:230px;flex:none;overflow-y:auto;padding:14px 14px 14px;border-right:1px solid var(--line);background:var(--paper);}
-  .chart-section{margin-bottom:16px;}
-  .chart-section-title{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:600;color:var(--ink-faint);margin:0 0 8px;}
-  .chart-rail label{margin:8px 0 4px;}
+  .chart-rail{width:190px;flex:none;overflow-y:auto;padding:12px;border-right:1px solid var(--line);background:var(--paper);font-size:12px;}
+  .chart-rail select, .chart-rail input[type=text], .chart-rail input[type=number]{font-size:12px;padding:5px 7px;height:30px;box-sizing:border-box;}
+  .chart-section{margin-bottom:12px;}
+  .chart-section-title{font-size:10px;text-transform:none;letter-spacing:normal;font-weight:600;color:var(--ink-faint);margin:0 0 5px;}
+  .chart-rail label{margin:6px 0 3px;font-size:11px;text-transform:none;letter-spacing:normal;font-weight:400;color:var(--ink-soft);}
   .chart-rail label:first-child{margin-top:0;}
   .chart-preview{flex:1;min-width:0;display:flex;padding:14px;gap:12px;}
   .chart-canvas-wrap{flex:1;min-width:0;position:relative;min-height:250px;}
@@ -15233,11 +15234,20 @@ window.tableau = __webpack_exports__;
   });
 
   document.getElementById('btnColumns').addEventListener('click', function(){
-    const html = '<div class="p-title">Dimensions</div>'+
-      DIM_ORDER.filter(d=>!dimOverrideFor(d).hiddenFromColumns).map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(state.groupBy.has(d)?'checked':'')+'> '+escapeHtml(selectorLabel(d))+'</label>').join('')+
-      '<div class="p-title">Measures</div>'+
-      state.valueColumns.filter(c=>!c.columnsListHidden).map(c=>'<label><input type="checkbox" data-role="colval" data-col="'+c.id+'" '+(c.visible?'checked':'')+'> '+escapeHtml(c.label)+(c.kind!=='measure'?' <span style="color:var(--ink-faint);font-size:10px;">('+c.kind+')</span>':'')+'</label>').join('');
+    const html =
+      '<div style="display:flex;gap:4px;">'+
+        '<div style="flex:1;min-width:0;">'+
+          '<div class="p-title">Measures</div>'+
+          state.valueColumns.filter(c=>!c.columnsListHidden).map(c=>'<label><input type="checkbox" data-role="colval" data-col="'+c.id+'" '+(c.visible?'checked':'')+'> '+escapeHtml(c.label)+(c.kind!=='measure'?' <span style="color:var(--ink-faint);font-size:10px;">('+c.kind+')</span>':'')+'</label>').join('')+
+        '</div>'+
+        '<div style="width:1px;background:var(--line);"></div>'+
+        '<div style="flex:1;min-width:0;">'+
+          '<div class="p-title">Dimensions</div>'+
+          DIM_ORDER.filter(d=>!dimOverrideFor(d).hiddenFromColumns).map(d=>'<label><input type="checkbox" data-role="coldim" data-dim="'+d+'" '+(state.groupBy.has(d)?'checked':'')+'> '+escapeHtml(selectorLabel(d))+'</label>').join('')+
+        '</div>'+
+      '</div>';
     const div = openPopover(this, html);
+    div.style.maxWidth = '420px';
     div.querySelectorAll('[data-role="coldim"]').forEach(cb=>{
       cb.addEventListener('change', ()=>{
         const d = cb.getAttribute('data-dim');
@@ -15590,7 +15600,7 @@ window.tableau = __webpack_exports__;
     layer.innerHTML =
       '<div class="modal-backdrop" id="chartBackdrop"><div class="modal chart-modal-v2">'+
         '<div class="chart-head">'+
-          '<h3>Create Chart</h3>'+
+          '<h3>Create chart</h3>'+
           '<button class="btn" id="chartExport" style="font-size:12px;padding:5px 10px;">\u2913 Export PNG</button>'+
         '</div>'+
         '<p class="hint">'+(state.selected.size>0 ? 'Based on '+rows.length+' selected row'+(rows.length===1?'':'s') : 'Based on all '+rows.length+' visible rows (nothing selected)')+' \u2014 drag the corner to resize.</p>'+
@@ -15598,7 +15608,7 @@ window.tableau = __webpack_exports__;
 
           '<div class="chart-rail">'+
             '<div class="chart-section">'+
-              '<div class="chart-section-title">Chart Type</div>'+
+              '<div class="chart-section-title">Chart type</div>'+
               '<select id="chartType">'+
                 ['bar','line','area','pie','scatter'].map(t=>'<option value="'+t+'" '+(t===defaultType?'selected':'')+'>'+(t==='area'?'Area':t.charAt(0).toUpperCase()+t.slice(1))+'</option>').join('')+
               '</select>'+
@@ -15606,46 +15616,46 @@ window.tableau = __webpack_exports__;
 
             '<div class="chart-section">'+
               '<div class="chart-section-title">Data</div>'+
-              '<div id="chartDimWrap"><label>X-Axis</label><select id="chartDim">'+
+              '<div id="chartDimWrap"><label>X-axis</label><select id="chartDim">'+
                 dimOptions.map(d=>'<option value="'+d+'" '+(d===defaultX?'selected':'')+'>'+escapeHtml(selectorLabel(d))+'</option>').join('')+
               '</select></div>'+
-              '<div id="chartMeasureWrap"><label>Y-Axis</label><select id="chartMeasure">'+
+              '<div id="chartMeasureWrap"><label>Y-axis</label><select id="chartMeasure">'+
                 measureOptions.map(m=>'<option value="'+m+'" '+(m===defaultMeasure?'selected':'')+'>'+escapeHtml(labelForValue(m))+'</option>').join('')+
               '</select></div>'+
-              '<div id="chartMeasure2Wrap" class="hidden"><label>Y-Axis (2nd measure)</label><select id="chartMeasure2">'+
+              '<div id="chartMeasure2Wrap" class="hidden"><label>Y-axis (2nd measure)</label><select id="chartMeasure2">'+
                 measureOptions.map((m,i)=>'<option value="'+m+'" '+(i===1?'selected':'')+'>'+escapeHtml(labelForValue(m))+'</option>').join('')+
               '</select></div>'+
-              '<div id="chartSeriesWrap"><label>Split By</label><select id="chartSeries">'+
+              '<div id="chartSeriesWrap"><label>Split by</label><select id="chartSeries">'+
                 '<option value="">(none)</option>'+
                 dimOptions.map(d=>'<option value="'+d+'">'+escapeHtml(selectorLabel(d))+'</option>').join('')+
               '</select></div>'+
             '</div>'+
 
             '<div class="chart-section" id="chartSeriesStyleSection">'+
-              '<div class="chart-section-title">Series Style</div>'+
+              '<div class="chart-section-title">Series style</div>'+
               '<label>Display</label><select id="chartSeriesMode">'+
-                '<option value="regular">Regular (Grouped)</option>'+
+                '<option value="regular">Regular (grouped)</option>'+
                 '<option value="stacked">Stacked</option>'+
-                '<option value="percent">100% Stacked</option>'+
+                '<option value="percent">100% stacked</option>'+
               '</select>'+
-              '<label>Legend Position</label><select id="chartLegendPos">'+
+              '<label>Legend position</label><select id="chartLegendPos">'+
                 '<option value="right">Right</option>'+
                 '<option value="left">Left</option>'+
               '</select>'+
-              '<label>Legend Title</label><input type="text" id="chartLegendTitle" placeholder="e.g. Platform">'+
+              '<label>Legend title</label><input type="text" id="chartLegendTitle" placeholder="e.g. Platform">'+
               '<label class="chart-check" style="margin-top:6px;"><input type="checkbox" id="chartShowLegendTitle" checked> Show legend title</label>'+
             '</div>'+
 
             '<div class="chart-section">'+
               '<div class="chart-section-title">Titles</div>'+
-              '<label>Chart Title</label><input type="text" id="chartTitle" placeholder="(none)">'+
+              '<label>Chart title</label><input type="text" id="chartTitle" placeholder="(none)">'+
               '<label>Subtitle</label><input type="text" id="chartSubtitle" placeholder="(none)">'+
             '</div>'+
 
             '<div class="chart-section">'+
-              '<div class="chart-section-title">Axis Labels</div>'+
-              '<label class="chart-check"><input type="checkbox" id="chartShowXLabel" checked> Show X-Axis label</label>'+
-              '<label class="chart-check"><input type="checkbox" id="chartShowYLabel" checked> Show Y-Axis label</label>'+
+              '<div class="chart-section-title">Axis labels</div>'+
+              '<label class="chart-check"><input type="checkbox" id="chartShowXLabel" checked> Show X-axis label</label>'+
+              '<label class="chart-check"><input type="checkbox" id="chartShowYLabel" checked> Show Y-axis label</label>'+
             '</div>'+
 
             '<div class="chart-section" id="chartThresholdCard">'+
