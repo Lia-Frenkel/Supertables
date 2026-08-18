@@ -40,19 +40,19 @@
   .dr-field label.dr-check{display:flex;align-items:center;gap:6px;font-size:12.5px;text-transform:none;letter-spacing:normal;font-weight:400;color:var(--ink-soft);padding-bottom:8px;cursor:pointer;white-space:nowrap;}
   .dr-check input{cursor:pointer;accent-color:var(--accent);}
 
-  .modal label.chart-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);padding:3px 2px;margin:0;border-radius:6px;}
+  .modal label.chart-check, .chart-modal-v2 .chart-rail label.chart-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);padding:3px 2px;margin:0;border-radius:6px;width:100%;box-sizing:border-box;}
   .chart-check:hover{background:var(--paper);}
-  .chart-check input{cursor:pointer;accent-color:var(--accent);flex:none;width:13px;height:13px;}
+  .modal input[type=checkbox]{cursor:pointer;accent-color:var(--accent);flex:none;width:13px;height:13px;padding:0;border:none;border-radius:0;background:none;}
   .chart-modal-v2{width:960px;height:620px;min-width:600px;min-height:460px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;resize:both;overflow:hidden;padding:0;}
   .chart-modal-v2 .chart-head{display:flex;justify-content:space-between;align-items:flex-start;padding:14px 18px 0;flex:none;}
   .chart-modal-v2 .chart-head h3{margin:0;font-size:14px;}
   .chart-modal-v2 p.hint{padding:0 18px;margin:4px 0 10px;font-size:11px;}
   .chart-body{display:flex;flex:1;min-height:0;border-top:1px solid var(--line);}
-  .chart-rail{width:190px;flex:none;overflow-y:auto;padding:12px;border-right:1px solid var(--line);background:var(--paper);font-size:12px;}
-  .chart-rail select, .chart-rail input[type=text], .chart-rail input[type=number]{font-size:12px;padding:5px 7px;height:30px;box-sizing:border-box;}
+  .chart-rail{width:190px;flex:none;overflow-y:auto;overflow-x:hidden;padding:12px;border-right:1px solid var(--line);background:var(--paper);font-size:12px;box-sizing:border-box;}
+  .chart-rail select, .chart-rail input[type=text], .chart-rail input[type=number]{font-size:12px;padding:5px 7px;height:30px;box-sizing:border-box;width:100%;}
   .chart-section{margin-bottom:12px;}
   .chart-section-title{font-size:10px;text-transform:none;letter-spacing:normal;font-weight:600;color:var(--ink-faint);margin:0 0 5px;}
-  .chart-rail label{margin:6px 0 3px;font-size:11px;text-transform:none;letter-spacing:normal;font-weight:400;color:var(--ink-soft);}
+  .chart-modal-v2 .chart-rail label{margin:6px 0 3px;font-size:11px;text-transform:none;letter-spacing:normal;font-weight:400;color:var(--ink-soft);}
   .chart-rail label:first-child{margin-top:0;}
   .chart-preview{flex:1;min-width:0;display:flex;padding:14px;gap:12px;}
   .chart-canvas-wrap{flex:1;min-width:0;position:relative;min-height:250px;}
