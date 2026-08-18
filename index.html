@@ -43,7 +43,7 @@
   .modal label.chart-check, .chart-modal-v2 .chart-rail label.chart-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);padding:3px 2px;margin:0;border-radius:6px;width:100%;box-sizing:border-box;}
   .chart-check:hover{background:var(--paper);}
   .modal input[type=checkbox]{cursor:pointer;accent-color:var(--accent);flex:none;width:13px;height:13px;padding:0;border:none;border-radius:0;background:none;}
-  .chart-modal-v2{width:960px;height:620px;min-width:600px;min-height:460px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;resize:both;overflow:hidden;padding:0;}
+  .chart-modal-v2{width:1160px;height:660px;min-width:600px;min-height:460px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;resize:both;overflow:hidden;padding:0;}
   .chart-modal-v2 .chart-head{display:flex;justify-content:space-between;align-items:flex-start;padding:14px 18px 0;flex:none;}
   .chart-modal-v2 .chart-head h3{margin:0;font-size:14px;}
   .chart-modal-v2 p.hint{padding:0 18px;margin:4px 0 10px;font-size:11px;}
@@ -15814,7 +15814,7 @@ window.tableau = __webpack_exports__;
             thresholdLine: { enabled: cfg.thresholdEnabled && !isPercent, value: cfg.thresholdValue, label: cfg.thresholdLabel, color: cfg.thresholdColor }
           }),
           scales: cfg.type==='pie' ? {} : {
-            x: { stacked: isStacked, title:{display:cfg.showXLabel, text:selectorLabel(cfg.dim)} },
+            x: { stacked: isStacked, title:{display:cfg.showXLabel, text: DIM_META[cfg.dim] ? DIM_META[cfg.dim].label : selectorLabel(cfg.dim)} },
             y: { stacked: isStacked, max: isPercent?100:undefined,
               title:{display:cfg.showYLabel, text: isPercent?'% of total':labelForValue(cfg.measure)},
               ticks:{ callback: isPercent ? (v=>v+'%') : abbreviatedAxisFormatter(cfg.measure) } }
